@@ -49,13 +49,8 @@ class CStyleLanguage(Renderer):
     elif dtype == dtypes.bool: val = "1" if x else "0"
     elif dtype == dtypes.float: val = f"{x}f"
     else: val = str(x)
-    return (
-      self.render_vectorize([val] * dtype.count, dtype)
-      if dtype.count > 1
-      else self.render_cast(val, dtype)
-      if dtype not in [dtypes.float, dtypes.int, dtypes.bool]
-      else val
-    )
+    if dtype.count > 1: return self.render_vectorize([val] * dtype.count, dtype)
+    return self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
