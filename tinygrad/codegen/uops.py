@@ -17,7 +17,7 @@ class UOps(Enum):
   CONST = auto(); SPECIAL = auto() # noqa: E702
   NOOP = auto(); UNMUL = auto(); GEP = auto() # noqa: E702
   # math ops
-  CAST = auto(); BITCAST = auto() # noqa: E702
+  CAST = auto(); BITCAST = auto(); VECTORIZE = auto() # noqa: E702
   ALU = auto(); WMMA = auto() # noqa: E702
   # memory/assignment ops
   LOAD = auto(); STORE = auto(); PHI = auto() # noqa: E702
