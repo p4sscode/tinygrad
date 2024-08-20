@@ -343,9 +343,9 @@ class AMDRenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]] # noqa: E501
 
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
-  ocml = [("__ocml_" + name + f"_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
+  ocml = [("__ocml_" + name + f"_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, "pure")
             for dt, n in [("float", 32), ("double", 64), ("_Float16", 16)]
-            for name, atr in [("fmax", "pure"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "pure"), ("sin", "pure")]]
+            for name in ["fmax", "exp2", "log2", "sqrt", "sin"]]
 
   kernel_prefix = "\n".join(f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml)
   kernel_prefix += '\nextern "C" __attribute__((global))'
