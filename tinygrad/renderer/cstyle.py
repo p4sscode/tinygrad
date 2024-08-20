@@ -345,7 +345,7 @@ class AMDRenderer(CStyleLanguage):
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
   ocml = [("__ocml_" + name + f"_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
             for dt, n in [("float", 32), ("double", 64), ("_Float16", 16)]
-            for name, atr in [("fmax", "const"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "const"), ("sin", "")]]
+            for name, atr in [("fmax", "pure"), ("exp2", "pure"), ("log2", "pure"), ("sqrt", "pure"), ("sin", "pure")]]
 
   kernel_prefix = "\n".join(f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml)
   kernel_prefix += '\nextern "C" __attribute__((global))'
