@@ -415,7 +415,7 @@ static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat
       # prefix.append("#define half _Float16")
       # vec_dts += [("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16)]
 
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None):
+    for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count > 1):
       prefix += [self.render_vector_prefix(dtype)]
 
     # prefix += [_make_hip_dtype(*x) for x in vec_dts]
