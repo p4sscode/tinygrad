@@ -356,11 +356,6 @@ def _make_hip_code_for_op():
     return cast_bf16
   return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
 
-# def _make_hip_dtype_old(base_type, name, cnt):
-#   elems, header = ', '.join(_nms[:cnt]), ', '.join([f"{base_type} {x}" for x in _nms[:cnt]])
-#   return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
-#          f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}({header}) {{ return {{{elems}}}; }}"
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
