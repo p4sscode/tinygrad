@@ -404,6 +404,7 @@ struct hip_bfloat16 {
 static inline __attribute__((device)) bool operator<(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) < ((float)b); }
 static inline __attribute__((device)) bool operator==(hip_bfloat16 a, hip_bfloat16 b) { return ((float)a) == ((float)b); }
 """)
+
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype is not None and uop.dtype.count > 1): prefix += [self.render_vector_prefix(dtype)]
 
     # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
