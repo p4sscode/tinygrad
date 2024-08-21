@@ -381,9 +381,8 @@ class AMDRenderer(CStyleLanguage):
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar()),
-    elems, header = ', '.join(_nms[:dtype.count]), ', '.join([f"{scal} {x}" for x in _nms[:dtype.count]])
-    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\n"+\
-           f"static inline __attribute__((device)) {vec} make_{vec}({header}) {{ return {{ {elems} }}; }}"
+    return f"typedef {scal} {vec} __attribute__((ext_vector_type({dtype.count})));\nstatic inline __attribute__((device))"+\
+           f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:dtype.count]])}) {{ return {{ {', '.join(_nms[:dtype.count])} }}; }}"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))", "typedef long unsigned int size_t;"]
