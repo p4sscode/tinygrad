@@ -625,7 +625,10 @@ def type_verify(uops):
       assert isinstance(arg[1], int), f"invalid {arg[1]=} ({type(arg[1])}), expected second arg to be local buffer's size (int)"
       assert len(src) == 0, "invalid src for local buffer"
       assert isinstance(dtype, PtrDType), f"invalid dtype for local buffer {dtype}, expected {PtrDType}"
-    if uop is UOps.DEFINE_GLOBAL: assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}"
+    if uop is UOps.DEFINE_GLOBAL:
+      assert isinstance(arg, int), f"invalid {arg=} ({type(arg)}), expected first arg to be global buffer's index (int)"
+      assert len(src) == 0, "invalid src for local buffer"
+      assert isinstance(dtype, (PtrDType, ImageDType)), f"invalid dtype for global buffer {dtype}, "
     if isinstance(dtype, ImageDType): assert uop is UOps.DEFINE_GLOBAL, f"{uop} can't be image"
     if uop is UOps.SHAPETRACKER: assert len(src) == 0, f"SHAPETRACKER must only define a ShapeTracker arg {uop}"
     if uop is UOps.REDUCE_AXIS: assert isinstance(arg, tuple) and len(arg) == 2 and arg[0] in BinaryOps, f"invalid arg for REDUCE_AXIS {arg}"
