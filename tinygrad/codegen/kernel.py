@@ -645,8 +645,8 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-          reduce_axes = list(i for i in range(len(tc.reduce_axes)))
           threads = prod(t[1] for t in tc.threads)
+          reduce_axes = list(i for i in range(len(tc.reduce_axes)))
           if self.opts.device in {"AMD", "HIP"}:
             upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
@@ -663,9 +663,9 @@ class Kernel:
             upcast_axes = [[(0, 8)], [(2, 2), (3, 2)], [(3, 2), (2, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
+              ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,5), (1,2), (0,0), (0,1), (1,4)))
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
-              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
+              ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (0,3), (1,4), (1,3), (1,2)))
           elif self.opts.suffix == "INTEL":
             upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             fix_st1 = functools.partial(fix_st, (8,), (16,8), (8,2,8), ((1,0),), ((1,2), (1,1), (0,0)))
