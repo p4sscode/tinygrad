@@ -646,7 +646,6 @@ class Kernel:
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           threads = prod(t[1] for t in tc.threads)
-          reduce_axes = list(i for i in range(len(tc.reduce_axes)))
           if self.opts.device in {"AMD", "HIP"}:
             upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
@@ -676,7 +675,7 @@ class Kernel:
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, threads,
                       tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in upcast_axes),
-                      tuple(self.first_upcast+ax for ax in reduce_axes))
+                      tuple(self.first_upcast+ax for ax, _ in enumerate(tc.reduce_axes)))
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
@@ -697,7 +696,7 @@ class Kernel:
             ret = UOp(UOps.REDUCE_AXIS, tc.dtype_out, (srcs[0].alu(BinaryOps.MUL, srcs[1]).cast(tc.dtype_out),), (alu_op, wmma_arg[-1]))
           else:
             ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
-          new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
+          new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in [ax for ax, _ in enumerate(tc.reduce_axes)])
           return replace(op, src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
