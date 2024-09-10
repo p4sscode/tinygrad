@@ -329,8 +329,8 @@ class Kernel:
         elif self.opts.device in {"CUDA", "NV"}:
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 8), append_opt=False)
           self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, 2), append_opt=False)
-          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
           # NOTE: LOCALS and UPCAST can be swapped here. it doesn't seem faster
+          for (tc_dim, tc_amt) in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[1], 2), append_opt=False)
           self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[0], 2), append_opt=False)
         self.tensor_core = tc
@@ -656,28 +656,29 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
+          reduce_axes = list(i for i in range(len(tc.reduce_axes)))
           threads = prod(t[1] for t in tc.threads)
           if self.opts.device in {"AMD", "HIP"}:
-            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             # https://gpuopen.com/learn/wmma_on_rdna3/
             fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
             fix_st2 = None
           elif self.opts.device == "METAL":
-            reduce_axes, upcast_axes = [0], [[(1, 2)], [(1, 2)], [(1, 2)]]
+            upcast_axes = [[(1, 2)], [(1, 2)], [(1, 2)]]
             fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
             fix_st2 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((0,0), (1,1), (1,2), (0,2), (1,0)), ((0,1), (0,3), (1,3)))
           elif self.opts.device == "CLANG":
-            reduce_axes, upcast_axes = [], [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
+            upcast_axes = [[(1,tc.dims[0])],[(0,tc.dims[1])],[(1, tc.dims[2]), (0, tc.dims[2])]]
             threads, fix_st1, fix_st2 = threads // tc.dims[2], None, None
           elif self.opts.device in {"CUDA", "NV"}:
-            reduce_axes, upcast_axes = [0, 1], [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
+            upcast_axes = [[(0, 8)], [(2, 2), (3, 2)], [(2, 2), (3, 2)]]
             # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
             fix_st1 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,4), (1,2), (0,0), (0,1), (1,5)))
             fix_st2 = functools.partial(fix_st, (2,2,2,2,2), (8,2,2,2), (2,2,2,2,2,2),
               ((1,1), (1,0), (1,5), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,3), (1,2)))
           elif self.opts.suffix == "INTEL":
-            reduce_axes, upcast_axes = [0], [[(0, 16)], [(0, 16)], [(1, 8)]]
+            upcast_axes = [[(0, 16)], [(0, 16)], [(1, 8)]]
             fix_st1 = functools.partial(fix_st, (8,), (16,8), (8,2,8), ((1,0),), ((1,2), (1,1), (0,0)))
             fix_st2 = None
           else:
