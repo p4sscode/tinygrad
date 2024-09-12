@@ -323,8 +323,8 @@ class Kernel:
         for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.UPCAST if AMX else OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
         for tc_dim,amt in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]):
           if tc.dims[tc_dim] > amt:
-            self.apply_opt(Opt(OptOps.UPCAST, tc_dim, tc.dims[tc_dim]//amt), append_opt=False)
-            tc_opts.upcasted_input.append((tc_dim, tc.dims[tc_dim]//amt))
+            self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], tc.dims[tc_dim]//amt), append_opt=False)
+            tc_opts.upcasted_input.append((tc_opts.axes[tc_dim], tc.dims[tc_dim]//amt))
 
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
