@@ -12,7 +12,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes: List[int]
+  reduce_axes: List[Tuple[int,int]]
   upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]]
   st1_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
   st2_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None

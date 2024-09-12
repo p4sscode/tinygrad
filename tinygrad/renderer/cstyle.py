@@ -245,7 +245,7 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do, reduce_axes=[16], upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=[(0,8)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
     st1_pattern=(((1,0),),((1,2),(1,1),(0,0))), expanded_shape=(8,2,8)) for di,do in [(dtypes.half, dtypes.float), (dtypes.bfloat16, dtypes.float)]]
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
@@ -267,7 +267,7 @@ class MetalRenderer(CStyleLanguage):
   shared_max = 32768
   tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
     st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
-    dtype_in=di,dtype_out=do,reduce_axes=[8]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
+    dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
 
   # language options
@@ -318,7 +318,7 @@ class CUDARenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))),
-    reduce_axes=[8,2], upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+    reduce_axes=[(0,8),(1,2)], upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -381,7 +381,7 @@ class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[16],
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)],
     upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0))), expanded_shape=(16,2,4))
     for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
 
