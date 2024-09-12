@@ -44,7 +44,7 @@ class TensorCoreOptions:
   axes: Tuple[int, ...] # the location of the original N and M axes if still in the shape
   axes_exist: Tuple[bool, ...] # true if the original N and M axes are still in the shape
   axis_pads: Tuple[Tuple[int, int], ...]
-  upcast_axes: List[Tuple[int, int]]
+  upcasted_input: List[Tuple[int, int]]
   def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
     axes, axes_exist = list(self.axes), list(self.axes_exist)
     for tc_dim in [i for i in range(2) if axes_exist[i]]:
@@ -302,9 +302,7 @@ class Kernel:
     if axis_pads and (opt_level < 2): return None
     self.bufs_for_tensor_core[reduceop] = (buf0, buf1)
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
-    upcast_axes = list(((s0, s1, s2)[i], tc.dims[i]//sz) for i, sz in
-                       enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]) if tc.dims[i] > sz)
-    return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads, upcast_axes=upcast_axes)
+    return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads, upcasted_input=[])
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and (self.opts.has_local or (self.opts.device == "CLANG" and AMX)) and self.reduceop is not None \
@@ -322,8 +320,12 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         for amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, amt), append_opt=False)
-        for tc_dim, tc_amt in tc.threads: self.apply_opt(Opt(OptOps.UPCAST if AMX else OptOps.LOCAL, tc_opts.axes[tc_dim], tc_amt), append_opt=False)
-        for tc_dim, tc_amt in tc_opts.upcast_axes: self.apply_opt(Opt(OptOps.UPCAST, tc_dim, tc_amt), append_opt=False)
+        for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.UPCAST if AMX else OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
+        for tc_dim,amt in enumerate([prod(x) for x in [[x[1] for x in tc.threads if x[0]==dim] for dim in range(2)]]):
+          if tc.dims[tc_dim] > amt:
+            self.apply_opt(Opt(OptOps.UPCAST, tc_dim, tc.dims[tc_dim]//amt), append_opt=False)
+            tc_opts.upcasted_input.append((tc_dim, tc.dims[tc_dim]//amt))
+
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -645,7 +647,7 @@ class Kernel:
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           warp_dims = tuple(sz for _, sz in tc.threads)
-          tcd_dims = tuple(tc.reduce_axes) + tuple(sz for _, sz in tco.upcast_axes)
+          tcd_dims = tuple(tc.reduce_axes) + tuple(sz for _, sz in tco.upcasted_input)
           fix_st1 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st1_pattern) if tc.st1_pattern else None
           fix_st2 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st2_pattern) if tc.st2_pattern else None
 
