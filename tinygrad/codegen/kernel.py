@@ -649,8 +649,8 @@ class Kernel:
 
           warp_dims = tuple(sz for _, sz in tc.threads)
           tcd_dims = tuple(tc.reduce_axes) + tuple(sz for _, sz in tco.upcast_axes)
-          fix_st1 = functools.partial(fix_st, warp_dims, tcd_dims, (2,2,2,2,2,2), *tc.st1_pattern) if tc.st1_pattern else None
-          fix_st2 = functools.partial(fix_st, warp_dims, tcd_dims, (2,2,2,2,2,2), *tc.st2_pattern) if tc.st2_pattern else None
+          fix_st1 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st1_pattern) if tc.st1_pattern else None
+          fix_st2 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st2_pattern) if tc.st2_pattern else None
 
           # AMD   fix_st1 = functools.partial(fix_st, (8,2,2), (16,8), (16,2,4), ((1,2), (0,2), (1,1), (0,1)), ((1,0), (0,0)))
           # METAL fix_st1 = functools.partial(fix_st, (2,4,2,2), (8,2), (2,2,2,2), ((1,1), (0,1), (1,0), (0,3)), ((0,0), (0,2), (1,3), (1,2)))
