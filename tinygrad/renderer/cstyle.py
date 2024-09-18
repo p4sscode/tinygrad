@@ -319,7 +319,13 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  tensor_cores_75 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2),
+    st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,3), (1,2), (0,0), (0,1), (1,4))),
+    st2_pattern=(((1,1), (1,0), (1,4), (0,0), (0,1)), ((0,4), (0,2), (0,3), (1,3), (1,2))),
+    reduce_axes=[(0,4),(1,2)], upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float)])]
+  def __init__(self, arch:str): 
+    self.arch=int(arch[3:])
+    self.tensor_cores = CUDARenderer.tensor_cores if self.arch >= 80 else CUDARenderer.tensor_cores_75 if self.arch >= 75 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -348,10 +354,16 @@ class CUDARenderer(CStyleLanguage):
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
-      prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
-  : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
-return c;}}""")
+      if self.arch >= 80:
+        prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+  asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
+    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
+  return c;}}""")
+      elif self.arch >= 75:
+        prefix.append(f"""__device__ {to}4 __{fn}({ti}4 a, {ti}2 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+  asm( "mma.sync.aligned.m16n8k8.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5 }}, {{ %6 }}, {{ %0, %1, %2, %3 }};"
+    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]) "r"(b_pk[0]));
+  return c;}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
