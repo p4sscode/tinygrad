@@ -85,7 +85,7 @@ ptx_matcher = PatternMatcher([
 class PTXRenderer(Renderer):
   suffix = "PTX"
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
-  tensor_cores_75 = [tc for tc in CUDARenderer.tensor_cores_75 if tc.dtype_in == dtypes.half]
+  tensor_cores_75 = CUDARenderer.tensor_cores_75
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
