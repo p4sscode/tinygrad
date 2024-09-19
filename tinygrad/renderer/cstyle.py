@@ -323,7 +323,7 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))),
     st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), reduce_axes=[(0,4),(1,2)],
     upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float)])]
-  def __init__(self, arch:str): 
+  def __init__(self, arch:str):
     self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else CUDARenderer.tensor_cores_75 if int(arch[3:]) >= 75 else []
 
   # language options
