@@ -353,7 +353,7 @@ class CUDARenderer(CStyleLanguage):
     for name, (N, M, K), dti, dto, _, _, (upc_a, upc_b, upc_c), _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       szc, sza, szb = (prod(sz for _, sz in upc) for upc in (upc_c, upc_a, upc_b))
       dtc, dta, dtb = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dto,szc),(dti,sza),(dti,szb)))
-      inc, ina, inb = ([i for i in range(sz*dt.itemsize//4)] for dt,sz in ((dto,szc), (dti,sza), (dti,szb)))
+      inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dto,szc), (dti,sza), (dti,szb)))
       argc, arga, argb = ", ".join([f"%{c}" for c in inc]), ", ".join([f"%{a+len(inc)}" for a in ina]), ", ".join([f"%{b+len(inc+ina)}" for b in inb])
       pa, pb = (",".join([f'"r"({v}_pk[{i}])' for i in range(sz*dt.itemsize//4)]) for dt,sz,v in ((dti,sza,'a'), (dti,szb, 'b')))
       prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
