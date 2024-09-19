@@ -350,20 +350,51 @@ class CUDARenderer(CStyleLanguage):
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
-    # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
-      if self.arch >= 80:
-        prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-  asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
-    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
-  return c;}}""")
-      elif self.arch >= 75:
-        prefix.append(f"""__device__ {to}4 __{fn}({ti}4 a, {ti}2 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-  asm( "mma.sync.aligned.m16n8k8.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5 }}, {{ %6 }}, {{ %0, %1, %2, %3 }};"
-    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]) "r"(b_pk[0]));
-  return c;}}""")
+    for name, (N, M, K), dti, dto, _, _, (upc_a, upc_b, upc_c), _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      szc, sza, szb = (prod(sz for _, sz in upc) for upc in (upc_c, upc_a, upc_b))
+      dtc, dta, dtb = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dto,szc),(dti,sza),(dti,szb)))
+      inc, ina, inb = (", ".join([f"%{i}" for i in range(sz*dt.itemsize//4)]) for dt,sz,v in ((dto,szc,'c'), (dti,sza,'a'), (dti,szb,'b')))
+      pa, pb = (",".join([f'"r"({v}_pk[{i}])' for i in range(sz)]) for sz,v in ((sza,'a'), (szb, 'b')))
+      prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dto]}.{dt_map[dti]}.{dt_map[dti]}.{dt_map[dto]} {{{inc}}}, {{{ina}}}, {{{inb}}}, {{{inc}}};"
+    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {pa}, {pb});\n  return c;\n}}""")
+
+# .reg .f16 %Ra<4>, %Rb<2>;
+# .reg .f32 %Rc<2>, %Rd<2>;
+# mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32
+#   {%Rd0, %Rd1, %Rd2, %Rd3},
+#   {%Ra0, %Ra1, %Ra2, %Ra3},
+#   {%Rb0, %Rb1},
+#   {%Rc0, %Rc1, %Rc2, %Rc3};
+ 
+# .reg .f16x2 %Ra<2>, %Rb<1>;
+# .reg .f32 %Rc<4>, %Rd<4>;
+# mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32
+#   {%Rd0, %Rd1, %Rd2, %Rd3},
+#   {%Ra0, %Ra1},
+#   {%Rb0},
+#   {%Rc0, %Rc1, %Rc2, %Rc3};
+      # fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
+  #     if self.arch >= 80:
+  #       prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+  # asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
+  #   : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
+  # return c;}}""")
+  #     elif self.arch >= 75:
+  #     prefix.append(f"""__device__ {to}4 __{fn}({ti}4 a, {ti}2 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+  # asm( "mma.sync.aligned.m16n8k8.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5 }}, {{ %6 }}, {{ %0, %1, %2, %3 }};"
+  #   : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]) "r"(b_pk[0]));
+  # return c;}}""")
+# __device__ float4 __WMMA_8_16_8_half_float(half4 a, half2 b, float4 c){ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+#   asm("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%0, %1, %2, %3}, {%0, %1}, {%0, %1, %2, %3};"
+#     : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]),"r"(a_pk[1]),"r"(a_pk[2]),"r"(a_pk[3]), "r"(b_pk[0]),"r"(b_pk[1]));
+#   return c;
+# }
+# __device__ float4 __WMMA_8_16_8_half_float(half4 a, half2 b, float4 c) { int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
+#   asm( "mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 { %0, %1, %2, %3 }, { %4, %5 }, { %6 }, { %0, %1, %2, %3 };"
+#     : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]) "r"(b_pk[0]));
+#   return c;}
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
