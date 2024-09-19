@@ -355,10 +355,10 @@ class CUDARenderer(CStyleLanguage):
       dtc, dta, dtb = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dto,szc),(dti,sza),(dti,szb)))
       inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dto,szc), (dti,sza), (dti,szb)))
       argc, arga, argb = ", ".join([f"%{c}" for c in inc]), ", ".join([f"%{a+len(inc)}" for a in ina]), ", ".join([f"%{b+len(inc+ina)}" for b in inb])
-      pa, pb = (", ".join([f'"r"({v}_pk[{i}])' for i in n]) for n,v in ((ina,'a'),(inb,'b')))
+      a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in inp]) for inp,v in ((ina,'a'),(inb,'b')))
       prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
   asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dto]}.{dt_map[dti]}.{dt_map[dti]}.{dt_map[dto]} {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"
-    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {pa}, {pb});\n  return c;\n}}""")
+    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
