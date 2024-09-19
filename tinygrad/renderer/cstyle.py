@@ -321,11 +321,10 @@ class CUDARenderer(CStyleLanguage):
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
   tensor_cores_75 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2),
     st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))),
-    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))),
-    reduce_axes=[(0,4),(1,2)], upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float)])]
+    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), reduce_axes=[(0,4),(1,2)],
+    upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float)])]
   def __init__(self, arch:str): 
-    self.arch=int(arch[3:])
-    self.tensor_cores = CUDARenderer.tensor_cores if self.arch >= 80 else CUDARenderer.tensor_cores_75 if self.arch >= 75 else []
+    self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else CUDARenderer.tensor_cores_75 if int(arch[3:]) >= 75 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -360,6 +359,7 @@ class CUDARenderer(CStyleLanguage):
       prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
   asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dto]}.{dt_map[dti]}.{dt_map[dti]}.{dt_map[dto]} {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"
     : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {pa}, {pb});\n  return c;\n}}""")
+
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str:
