@@ -262,17 +262,5 @@ class PTXRenderer(Renderer):
             {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sza])}}}, {{{", ".join(wmma[sza:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
-# mov.b32         %wmma_b32_84, {%val_f16_40, %val_f16_41};
-# mov.b32         %wmma_b32_85, {%val_f16_44, %val_f16_45};
-# mov.b32         %wmma_b32_86, {%val_f16_42, %val_f16_43};
-# mov.b32         %wmma_b32_87, {%val_f16_46, %val_f16_47};
-# mov.b32         %wmma_b32_88, {%val_f16_2, %val_f16_6};
-# mov.b32         %wmma_b32_89, {%val_f16_10, %val_f16_14};
-# mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32                  {%wmma_f32_56, %wmma_f32_57, %wmma_f32_58, %wmma_f32_59}, {%wmma_b32_84, %wmma_b32_85, %wmma_b32_86, %wmma_b32_87}, {%wmma_b32_88, %wmma_b32_89}, {%acc_f32_56, %acc_f32_57, %acc_f32_58, %acc_f32_59};
-    
-# mov.b32         %wmma_b32_45, {%val_f16_20, %val_f16_21};
-# mov.b32         %wmma_b32_46, {%val_f16_22, %val_f16_23};
-# mov.b32         %wmma_b32_47, {%val_f16_3, %val_f16_7};
-# mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32                  {%wmma_f32_60, %wmma_f32_61, %wmma_f32_62, %wmma_f32_63}, {%wmma_b32_45, %wmma_b32_46, %wmma_b32_47}, {}, {%acc_f32_60, %acc_f32_61, %acc_f32_62, %acc_f32_63};
     return self.render_kernel(kernel, name, bufs, c.items())
 
