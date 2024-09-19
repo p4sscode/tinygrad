@@ -6,6 +6,7 @@ from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.helpers import prod
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -82,15 +83,15 @@ ptx_matcher = PatternMatcher([
 ])
 
 class PTXRenderer(Renderer):
-  device = "CUDA"
   suffix = "PTX"
-  global_max = (2147483647, 65535, 65535)
-  local_max = (1024, 1024, 64)
-  shared_max = 49152
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
+  tensor_cores_75 = [tc for tc in CUDARenderer.tensor_cores_75 if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="CUDA"): self.device, self.tensor_cores = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str, device="CUDA"): 
+    self.device = device
+    self.global_max, self.local_max, self.shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
+    self.tensor_cores = PTXRenderer.tensor_cores if int(arch[3:])>=80 else PTXRenderer.tensor_cores_75 if int(arch[3:])>=75 else []
 
   # language options
   kernel_prefix = """.version VERSION
@@ -250,15 +251,28 @@ class PTXRenderer(Renderer):
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
-          wmma = []
+          _, (N, M, K), dti, _, _, _, (upc_a, _, _), _ = args
+          wmma, sza = [], prod(sz for _, sz in upc_a) * dti.itemsize // 4
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-          kk(f'mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[src[2]])}}};')
+          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.f16.f16.f32\
+            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sza])}}}, {{{", ".join(wmma[sza:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
+# mov.b32         %wmma_b32_84, {%val_f16_40, %val_f16_41};
+# mov.b32         %wmma_b32_85, {%val_f16_44, %val_f16_45};
+# mov.b32         %wmma_b32_86, {%val_f16_42, %val_f16_43};
+# mov.b32         %wmma_b32_87, {%val_f16_46, %val_f16_47};
+# mov.b32         %wmma_b32_88, {%val_f16_2, %val_f16_6};
+# mov.b32         %wmma_b32_89, {%val_f16_10, %val_f16_14};
+# mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32                  {%wmma_f32_56, %wmma_f32_57, %wmma_f32_58, %wmma_f32_59}, {%wmma_b32_84, %wmma_b32_85, %wmma_b32_86, %wmma_b32_87}, {%wmma_b32_88, %wmma_b32_89}, {%acc_f32_56, %acc_f32_57, %acc_f32_58, %acc_f32_59};
+    
+# mov.b32         %wmma_b32_45, {%val_f16_20, %val_f16_21};
+# mov.b32         %wmma_b32_46, {%val_f16_22, %val_f16_23};
+# mov.b32         %wmma_b32_47, {%val_f16_3, %val_f16_7};
+# mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32                  {%wmma_f32_60, %wmma_f32_61, %wmma_f32_62, %wmma_f32_63}, {%wmma_b32_45, %wmma_b32_46, %wmma_b32_47}, {}, {%acc_f32_60, %acc_f32_61, %acc_f32_62, %acc_f32_63};
     return self.render_kernel(kernel, name, bufs, c.items())
 
