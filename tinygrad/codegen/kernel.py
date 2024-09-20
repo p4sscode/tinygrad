@@ -318,9 +318,9 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         for opt in tc.opt_seq:
-          if opt=="UR": [self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False) for tc_dim,amt in tc.reduce_axes]
-          if opt=="UP": [self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.threads]
-          if opt=="LC": [self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.early_upcast_axes]
+          if opt == "UR": [self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False) for _,amt in tc.reduce_axes]
+          if opt == "UP": [self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.threads]
+          if opt == "LC": [self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.early_upcast_axes]
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
