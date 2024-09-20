@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
+from tinygrad.helpers import _CURRENT_KERNEL, all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
@@ -310,16 +310,20 @@ class Kernel:
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
         if tensor_core_opts[0] is None: continue
-        # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
+        # tensor core -- unroll the reduce dim, upcast input and local the correct thread pattern
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
         # attempt to pad the tensor axes that require it
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, amt), append_opt=False)
-        for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
-        for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], amt), append_opt=False)
+        for opt in tc.opt_seq:
+          if opt == "UR":
+            for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
+          elif opt == "UP":
+            for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False)
+          elif opt == "LC":
+            for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[tc_dim],amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -351,15 +355,12 @@ class Kernel:
         else:
           if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
-          for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]:
-            szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]]%sz==0]
+          for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
+            szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
             if szs: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
 
-          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
-            for upc in [4,2]:
-              if self.full_shape[tc_opts.axes[0]] % upc == 0:
-                self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
-                break
+          if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if self.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
+            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
       return True
     except KernelOptError:
       return False
@@ -647,8 +648,7 @@ class Kernel:
 
           assert apply_to_st is None, "double tensor core? not supported"
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(t[1] for t in tc.threads),
-                      tuple(tuple((self.first_upcast+ax, sz) for ax, sz in up) for up in tc.upcast_axes),
-                      tuple(self.first_upcast+ax for ax, _ in tc.reduce_axes))
+            tuple(tuple((self.first_upcast+ax,sz) for ax,sz in up) for up in tc.upcast_axes), tuple(self.first_upcast+ax for ax,_ in tc.reduce_axes))
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
@@ -706,7 +706,9 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
@@ -732,10 +734,8 @@ class Kernel:
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
-  if uop in sts: return
+  if not uop.has_st or uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
@@ -749,9 +749,9 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     assert op in {UOps.SHAPETRACKER, UOps.SWIZZLE, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else -1]]
-    for x in (src[1:] if op in BUFFER_UOPS else src):
-      if sts[x].shape != st.shape:
+    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else 0]]
+    for x in src:
+      if x.has_st and sts[x].shape != st.shape:
         if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")
         raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
   sts[uop] = st
