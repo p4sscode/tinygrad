@@ -1,5 +1,5 @@
 import unittest
-import os
+import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
@@ -9,7 +9,9 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import UOpRet, load_kernels
+from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
+
+def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs.values(), lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -121,8 +123,7 @@ class TestViz(unittest.TestCase):
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 1)
-    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 1)
+    assert all(len(v) == 1 for k,v in group_rewrites(kernels[0]).items() if "schedule.py" in k)
 
   def test_no_dedup_different_opts(self):
     contexts.clear()
@@ -132,10 +133,22 @@ class TestViz(unittest.TestCase):
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 2)
-    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 1)
-    schedule_ctxs = [x for x in kernels[1].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 0)
+    assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
+    assert all(len(v) == 0 for k,v in group_rewrites(kernels[1]).items() if "schedule.py" in k)
+
+  def test_fold_const_nodes(self):
+    a = Tensor.empty(4, 4)+2
+    contexts.clear()
+    sink = a.schedule()[-1].ast
+    ret = uop_to_json(sink)
+    for v in ret.values(): print(v)
+    assert not any(v[0].startswith("CONST") for v in ret.values())
+    assert len([x for x in ret.values() if "CONST" in x[0]]) == 1
+
+  def test_no_fold_single_const(self):
+    node = UOp(UOps.CONST, dtypes.float, (), 1.0)
+    ret = uop_to_json(node)
+    assert len(ret) == 1
 
 if __name__ == "__main__":
   unittest.main()
