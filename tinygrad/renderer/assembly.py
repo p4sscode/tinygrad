@@ -84,7 +84,10 @@ ptx_matcher = PatternMatcher([
 
 class PTXRenderer(Renderer):
   suffix = "PTX"
-  tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
+  global_max = (2147483647, 65535, 65535)
+  local_max = (1024, 1024, 64)
+  shared_max = 49152
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
