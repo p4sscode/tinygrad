@@ -48,9 +48,12 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  *((UPat(UOps.ALU, arg=arg, name='op'),lambda r, op: f"({r[op.src[0]]}{r.symbol_for_binary_op[op.arg]}{r[op.src[1]]})")
-    for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,
-                BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}),
+  *((UPat(UOps.ALU, arg=bin_op, name='op'),lambda r, op: f"({r[op.src[0]]}{r.symbol_for_op[op.arg]}{r[op.src[1]]})")
+    for bin_op in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,
+                   BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}),
+  *((UPat(UOps.ALU, arg=unry_op, name='op'),lambda r, op: f"({r.symbol_for_op[op.arg]}({r[op.src[0]]}))")
+    for unry_op in {UnaryOps.SQRT,UnaryOps.EXP2,UnaryOps.NEG,UnaryOps.LOG2,UnaryOps.SIN}),
+  (UPat(UOps.ALU, arg=BinaryOps.MAX, name='op'), lambda r, op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]},{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
@@ -85,17 +88,9 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = {
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-    UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
-    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
-  symbol_for_binary_op: Dict = {BinaryOps.SHL: "<<",BinaryOps.SHR: ">>",BinaryOps.ADD: "+",BinaryOps.SUB: "-",BinaryOps.IDIV: "/",BinaryOps.MUL: "*",
-    BinaryOps.MOD: "%",BinaryOps.CMPLT: "<",BinaryOps.CMPNE: "!=",BinaryOps.XOR: "^",BinaryOps.AND: "&",BinaryOps.OR: "|",}
+  symbol_for_op: Dict = {BinaryOps.SHL:"<<",BinaryOps.SHR:">>",BinaryOps.ADD:"+",BinaryOps.SUB:"-",BinaryOps.IDIV:"/",BinaryOps.MUL:"*",
+    BinaryOps.MOD:"%",BinaryOps.CMPLT:"<",BinaryOps.CMPNE:"!=",BinaryOps.XOR:"^",BinaryOps.AND:"&",BinaryOps.OR:"|",UnaryOps.SQRT:"sqrt",
+    UnaryOps.NEG:"-",UnaryOps.EXP2:"exp2",UnaryOps.LOG2:"log2",UnaryOps.SIN:"sin",UnaryOps.RECIP:"1/",BinaryOps.MAX:"max"}
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
