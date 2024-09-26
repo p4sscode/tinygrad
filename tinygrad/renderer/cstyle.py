@@ -91,6 +91,7 @@ class CStyleLanguage(Renderer):
   symbol_for_op: Dict = {BinaryOps.SHL:"<<",BinaryOps.SHR:">>",BinaryOps.ADD:"+",BinaryOps.SUB:"-",BinaryOps.IDIV:"/",BinaryOps.MUL:"*",
     BinaryOps.MOD:"%",BinaryOps.CMPLT:"<",BinaryOps.CMPNE:"!=",BinaryOps.XOR:"^",BinaryOps.AND:"&",BinaryOps.OR:"|",UnaryOps.SQRT:"sqrt",
     UnaryOps.NEG:"-",UnaryOps.EXP2:"exp2",UnaryOps.LOG2:"log2",UnaryOps.SIN:"sin",UnaryOps.RECIP:"1/",BinaryOps.MAX:"max"}
+  code_for_op:Dict
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
