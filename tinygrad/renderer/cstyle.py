@@ -48,8 +48,10 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  # (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
-    # *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
+  *((UPat(UOps.ALU, arg=arg, name='op'),lambda r, op: f"({r[op.src[0]]}{r.symbol_for_binary_op[op.arg]}{r[op.src[1]]})")
+    for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,
+                BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}),
+  (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -65,19 +67,6 @@ extra_pm = PatternMatcher([
   # gate any stores that aren't gated with ifs
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(UOps.STORE, src=store.src[:3]+(UOp(UOps.IF, src=(store.src[3],)),))),
-])
-
-code_for_op_pm = PatternMatcher([
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name='op'), lambda r, op: f"({r[op.src[0]]}+{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, name='op'), lambda r, op: f"({r[op.src[0]]}*{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.OR, name='op'), lambda r, op: f"({r[op.src[0]]}|{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.SHL, name='op'), lambda r, op: f"({r[op.src[0]]}<<{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.SHR, name='op'), lambda r, op: f"({r[op.src[0]]}>>{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.AND, name='op'), lambda r, op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.XOR, name='op'), lambda r, op: f"({r[op.src[0]]}^{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.CMPLT, name='op'), lambda r, op: f"({r[op.src[0]]}<{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.CMPNE, name='op'), lambda r, op: f"({r[op.src[0]]}!={r[op.src[1]]})"),
 ])
 
 class CStyleLanguage(Renderer):
@@ -100,17 +89,16 @@ class CStyleLanguage(Renderer):
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-    BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
+    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
+  symbol_for_binary_op: Dict = {BinaryOps.SHL: "<<",BinaryOps.SHR: ">>",BinaryOps.ADD: "+",BinaryOps.SUB: "-",BinaryOps.IDIV: "/",BinaryOps.MUL: "*",
+    BinaryOps.MOD: "%",BinaryOps.CMPLT: "<",BinaryOps.CMPNE: "!=",BinaryOps.XOR: "^",BinaryOps.AND: "&",BinaryOps.OR: "|",}
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
-  op_rewrite = code_for_op_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -160,9 +148,6 @@ class CStyleLanguage(Renderer):
         r[u] = f"{prefix}{c[prefix]}"
 
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
-      if l is None:
-        l = cast(str, self.op_rewrite.rewrite(u, ctx=self))
-
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
