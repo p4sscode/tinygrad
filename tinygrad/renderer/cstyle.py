@@ -52,7 +52,7 @@ base_rewrite = PatternMatcher([
      lambda r,op: f"({r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{r[op.src[1]]})")
      for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,
                  BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}],
-  *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"({sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]}))")
+  *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
     for unry_op in {UnaryOps.SQRT,UnaryOps.EXP2,UnaryOps.NEG,UnaryOps.LOG2,UnaryOps.SIN,UnaryOps.RECIP}],
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name='op'), lambda r, op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]},{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
