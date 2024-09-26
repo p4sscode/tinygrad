@@ -93,18 +93,6 @@ class CStyleLanguage(Renderer):
     BinaryOps.MOD:"%",BinaryOps.CMPLT:"<",BinaryOps.CMPNE:"!=",BinaryOps.XOR:"^",BinaryOps.AND:"&",BinaryOps.OR:"|",UnaryOps.SQRT:"sqrt",
     UnaryOps.NEG:"-",UnaryOps.EXP2:"exp2",UnaryOps.LOG2:"log2",UnaryOps.SIN:"sin",UnaryOps.RECIP:"1/",BinaryOps.MAX:"max"}
 
-  # code_for_op: Dict = {
-  # UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-  # UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-  # UnaryOps.NEG: lambda x,dtype: f"-{x}",
-  # UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-  # BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
-  # BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-  # BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-  # BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-  # BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
-  # TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
-
   code_for_op:Dict
 
   string_rewrite = base_rewrite
@@ -191,7 +179,7 @@ class ClangRenderer(CStyleLanguage):
   symbol_for_op = {**({k:v for k,v in CStyleLanguage().symbol_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda dtype: "__builtin_sqrtl" if dtype == dtypes.float64 else "__builtin_sqrtf"}
   string_rewrite = PatternMatcher([(UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"),
-                                    lambda r, op: f"({r[op.src[0]]}>{r[op.src[1]]}:{r[op.src[0]]},{r[op.src[1]]})")]) + base_rewrite
+                                    lambda r, op: f"({r[op.src[0]]}>{r[op.src[1]]}?{r[op.src[0]]}:{r[op.src[1]]})")]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
