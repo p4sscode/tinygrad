@@ -58,7 +58,7 @@ base_rewrite = PatternMatcher([
    lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}*{strip_parens(r[b]) if b.arg == op.arg else r[b]})"),
   (UPat(UOps.ALU, arg=BinaryOps.MOD, name="op"), lambda r,op: f"({r[op.src[0]]}%{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=BinaryOps.CMPLT, name="op"), lambda r,op: f"({r[op.src[0]]}<{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.CMPLT, name="op"), lambda r,op: f"({r[op.src[0]]}!={r[op.src[1]]})"),
+  (UPat(UOps.ALU, arg=BinaryOps.CMPNE, name="op"), lambda r,op: f"({r[op.src[0]]}!={r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=BinaryOps.XOR, src=(UPat.var("a"), UPat.var("b")), name="op"),
    lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}^{strip_parens(r[b]) if b.arg == op.arg else r[b]})"),
   (UPat(UOps.ALU, arg=BinaryOps.AND, name="op"), lambda r,op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
