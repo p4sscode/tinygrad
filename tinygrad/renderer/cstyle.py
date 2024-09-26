@@ -458,7 +458,7 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.SIN: "__builtin_sin",
+  symbol_for_op = {**ClangRenderer().symbol_for_op, UnaryOps.SIN: "__builtin_sin",
                  UnaryOps.LOG2: lambda dtype: "__builtin_log2l" if dtype==dtypes.float64 else "__builtin_log2f",
                  UnaryOps.EXP2: lambda dtype: "__builtin_exp2l" if dtype==dtypes.float64 else "__builtin_exp2f"}
 
