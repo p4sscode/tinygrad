@@ -49,7 +49,7 @@ base_rewrite = PatternMatcher([
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
   *[(UPat(UOps.ALU,arg=arg,name='op'),
-     lambda r,op: f"({strip_parens(r[op.src[0]]) if op.src[0].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{strip_parens(r[op.src[1]]) if op.src[0].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[1]]})") # noqa:E501
+     lambda r,op: f"({strip_parens(r[op.src[0]]) if op.src[0].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{strip_parens(r[op.src[1]]) if op.src[1].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[1]]})") # noqa:E501
      for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,
                  BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}],
   *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
