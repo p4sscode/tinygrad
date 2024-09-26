@@ -52,7 +52,7 @@ base_rewrite = PatternMatcher([
   # (UPat(UOps.ALU, arg=BinaryOps.SHL, name="op"), lambda r,op: f"({r[op.src[0]]}<<{r[op.src[1]]})"),
   # (UPat(UOps.ALU, arg=BinaryOps.SHR, name="op"), lambda r,op: f"({r[op.src[0]]}>>{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=BinaryOps.AND, name="op"), lambda r,op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.OR, name="op"), lambda r,op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
+  (UPat(UOps.ALU, arg=BinaryOps.OR, name="op"), lambda r,op: f"({r[op.src[0]]}|{r[op.src[1]]})"),
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
