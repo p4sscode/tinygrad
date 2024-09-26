@@ -48,34 +48,18 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  # (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
-  # *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
   *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
     for unry_op in {UnaryOps.SQRT,UnaryOps.RECIP,UnaryOps.NEG,UnaryOps.EXP2,UnaryOps.LOG2,UnaryOps.SIN}],
-  # *[(UPat(UOps.ALU,arg=unry_op,name='op', src=(UPat.var("src"))),lambda r,op,src:
-  #   f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[src]})")
-  #   for unry_op in {UnaryOps.SQRT,UnaryOps.RECIP,UnaryOps.NEG,UnaryOps.EXP2,UnaryOps.LOG2,UnaryOps.SIN}],
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name='op'), lambda r, op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]},{r[op.src[1]]})"),
   *[(UPat(UOps.ALU,arg=arg,name='op'),
-     lambda r,op: f"({strip_parens(r[op.src[0]]) if op.src[0].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{strip_parens(r[op.src[1]]) if op.src[1].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[1]]})") # noqa:E501
-     for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,
-                 BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}],
+     lambda r,op: f"({r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{r[op.src[1]]})")
+     for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.AND,BinaryOps.OR}],
+  *[(UPat(UOps.ALU,arg=arg,name='op'), lambda r,op: f"({strip_parens(r[op.src[0]])}{r.symbol_for_op[op.arg]}{strip_parens(r[op.src[1]])})")
+     for arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}],
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
 ])
-
-# code_for_op: Dict = {
-#   UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-#   UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-#   UnaryOps.NEG: lambda x,dtype: f"-{x}",
-#   UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-#   BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
-#   BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-#   BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-#   BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-#   BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
-#   TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
 extra_pm = PatternMatcher([
   # consts are rendered to larger type and casted
