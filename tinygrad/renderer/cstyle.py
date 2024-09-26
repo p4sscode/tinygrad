@@ -13,6 +13,10 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
+symbol_for_op = {BinaryOps.SHL:"<<", BinaryOps.SHR:">>", BinaryOps.SUB:"-", BinaryOps.IDIV:"/", BinaryOps.MOD:"%", BinaryOps.CMPLT:"<",
+                 BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|"}
+symbol_for_op_conm = {BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^"}
+
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -48,21 +52,12 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  (UPat(UOps.ALU, arg=BinaryOps.SHL, name="op"), lambda r,op: f"({r[op.src[0]]}<<{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.SHR, name="op"), lambda r,op: f"({r[op.src[0]]}>>{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("a"), UPat.var("b")), name="op"),
-   lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}+{strip_parens(r[b]) if b.arg == op.arg else r[b]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.SUB, name="op"), lambda r,op: f"({r[op.src[0]]}-{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="op"), lambda r,op: f"({r[op.src[0]]}/{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("a"), UPat.var("b")), name="op"),
-   lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}*{strip_parens(r[b]) if b.arg == op.arg else r[b]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.MOD, name="op"), lambda r,op: f"({r[op.src[0]]}%{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.CMPLT, name="op"), lambda r,op: f"({r[op.src[0]]}<{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.CMPNE, name="op"), lambda r,op: f"({r[op.src[0]]}!={r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.XOR, src=(UPat.var("a"), UPat.var("b")), name="op"),
-   lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}^{strip_parens(r[b]) if b.arg == op.arg else r[b]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.AND, name="op"), lambda r,op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
-  (UPat(UOps.ALU, arg=BinaryOps.OR, name="op"), lambda r,op: f"({r[op.src[0]]}|{r[op.src[1]]})"),
+  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"({r[op.src[0]]}{symbol_for_op[op.arg]}{r[op.src[1]]})") for arg in symbol_for_op.keys()],
+  *[(UPat(UOps.ALU, arg=arg, src=(UPat.var("a"), UPat.var("b")), name="op"),lambda r,op,a,b:
+     f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}{symbol_for_op_conm[op.arg]}{strip_parens(r[b]) if b.arg == op.arg else r[b]})")
+     for arg in symbol_for_op_conm.keys()],
+
+  (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="op"), lambda r,op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
 
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*([r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
@@ -102,11 +97,15 @@ class CStyleLanguage(Renderer):
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
-    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    # BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
+    # BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
+    # BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
+    # BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    # BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
+    # TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
+    }
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
