@@ -64,8 +64,7 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.AND, name="op"), lambda r,op: f"({r[op.src[0]]}&{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=BinaryOps.OR, name="op"), lambda r,op: f"({r[op.src[0]]}|{r[op.src[1]]})"),
 
-  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
-    *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
+  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*([r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -103,7 +102,9 @@ class CStyleLanguage(Renderer):
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
+    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
