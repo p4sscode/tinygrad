@@ -48,6 +48,8 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
+  # (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
+  # *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
   *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
@@ -194,7 +196,7 @@ class ClangRenderer(CStyleLanguage):
   symbol_for_op = {**({k:v for k,v in CStyleLanguage().symbol_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda dtype: "__builtin_sqrtl" if dtype == dtypes.float64 else "__builtin_sqrtf"}
   string_rewrite = PatternMatcher([(UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"),
-                                    lambda r, op: f"({r[op.src[0]]}>{r[op.src[1]]}?{r[op.src[0]]}:{r[op.src[1]]})")]) + base_rewrite
+                                    lambda r, op: f"(({r[op.src[0]]}>{r[op.src[1]]})?{r[op.src[0]]}:{r[op.src[1]]})")]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
