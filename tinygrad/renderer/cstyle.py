@@ -48,8 +48,6 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
   *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
     for unry_op in {UnaryOps.SQRT,UnaryOps.RECIP,UnaryOps.NEG,UnaryOps.EXP2,UnaryOps.LOG2,UnaryOps.SIN}],
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name='op'), lambda r, op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]},{r[op.src[1]]})"),
@@ -59,6 +57,8 @@ base_rewrite = PatternMatcher([
   *[(UPat(UOps.ALU,arg=arg,name='op'), lambda r,op: f"({strip_parens(r[op.src[0]])}{r.symbol_for_op[op.arg]}{strip_parens(r[op.src[1]])})")
      for arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}],
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
+  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
+    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
 
 extra_pm = PatternMatcher([
