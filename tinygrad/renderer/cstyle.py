@@ -48,16 +48,19 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
+  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
+    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
   *[(UPat(UOps.ALU,arg=unry_op,name='op'),lambda r,op: f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[op.src[0]]})")
     for unry_op in {UnaryOps.SQRT,UnaryOps.RECIP,UnaryOps.NEG,UnaryOps.EXP2,UnaryOps.LOG2,UnaryOps.SIN}],
+  # *[(UPat(UOps.ALU,arg=unry_op,name='op', src=(UPat.var("src"))),lambda r,op,src:
+  #   f"{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}({r[src]})")
+  #   for unry_op in {UnaryOps.SQRT,UnaryOps.RECIP,UnaryOps.NEG,UnaryOps.EXP2,UnaryOps.LOG2,UnaryOps.SIN}],
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name='op'), lambda r, op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]},{r[op.src[1]]})"),
   *[(UPat(UOps.ALU,arg=arg,name='op'),
      lambda r,op: f"({strip_parens(r[op.src[0]]) if op.src[0].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{strip_parens(r[op.src[1]]) if op.src[1].arg == op.arg and op.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[op.src[1]]})") # noqa:E501
      for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.ADD,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MUL,
                  BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.XOR,BinaryOps.AND,BinaryOps.OR}],
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
-  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
 
 # code_for_op: Dict = {
@@ -458,8 +461,8 @@ class DSPRenderer(ClangRenderer):
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   symbol_for_op = {**ClangRenderer().symbol_for_op, UnaryOps.SIN: "__builtin_sin",
-                 UnaryOps.LOG2: lambda dtype: "__builtin_log2l" if dtype==dtypes.float64 else "__builtin_log2f",
-                 UnaryOps.EXP2: lambda dtype: "__builtin_exp2l" if dtype==dtypes.float64 else "__builtin_exp2f"}
+                 UnaryOps.LOG2: lambda dtype: "__builtin_log2l" if dtype == dtypes.float64 else "__builtin_log2f",
+                 UnaryOps.EXP2: lambda dtype: "__builtin_exp2l" if dtype == dtypes.float64 else "__builtin_exp2f"}
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
