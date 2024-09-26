@@ -96,6 +96,7 @@ class CStyleLanguage(Renderer):
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
   string_rewrite = base_rewrite
+
   extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
