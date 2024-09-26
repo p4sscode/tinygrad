@@ -190,9 +190,8 @@ class ClangRenderer(CStyleLanguage):
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   symbol_for_op = {**({k:v for k,v in CStyleLanguage().symbol_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda dtype: "__builtin_sqrtl" if dtype == dtypes.float64 else "__builtin_sqrtf"}
-  # code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
-  #                UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
-  #                BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  string_rewrite = PatternMatcher([(UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"),
+                                    lambda r, op: f"({r[op.src[0]]}>{r[op.src[1]]}:{r[op.src[0]]},{r[op.src[1]]})")]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -288,6 +287,7 @@ class MetalRenderer(CStyleLanguage):
 
   # precise::sin
   code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.SIN: "precise::sin"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -308,13 +308,6 @@ class MetalRenderer(CStyleLanguage):
   b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
-
-code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
-                    BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
-                    UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
 
@@ -338,7 +331,12 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
+  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.RECIP: lambda dtype: "hrcp" if dtype in (dtypes.half, dtypes.bfloat16) else "1/",
+                    BinaryOps.MAX: lambda dtype: "__hmax" if dtype in (dtypes.half, dtypes.bfloat16) else "max",
+                    UnaryOps.SQRT: lambda dtype: "hsqrt" if dtype in (dtypes.half, dtypes.bfloat16) else "sqrt",
+                    UnaryOps.SIN: lambda dtype: "hsin" if dtype in (dtypes.half, dtypes.bfloat16) else "sin",
+                    UnaryOps.LOG2: lambda dtype: "hlog2" if dtype in (dtypes.half, dtypes.bfloat16) else "log2",
+                    UnaryOps.EXP2: lambda  dtype: "hexp2" if dtype in (dtypes.half, dtypes.bfloat16) else "exp2"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
   def render_vector_prefix(self, dt:DType) -> str:
@@ -460,9 +458,9 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer().code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
-                 UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
-                 UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.SIN: "__builtin_sin",
+                 UnaryOps.LOG2: lambda dtype: "__builtin_log2l" if dtype==dtypes.float64 else "__builtin_log2f",
+                 UnaryOps.EXP2: lambda dtype: "__builtin_exp2l" if dtype==dtypes.float64 else "__builtin_exp2f"}
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
