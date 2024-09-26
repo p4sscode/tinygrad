@@ -54,7 +54,8 @@ base_rewrite = PatternMatcher([
   *[(UPat(UOps.ALU,arg=arg,name='op'),
      lambda r,op: f"({r[op.src[0]]}{sy if isinstance((sy:=r.symbol_for_op[op.arg]),str) else sy(op.dtype)}{r[op.src[1]]})")
      for arg in {BinaryOps.SHL,BinaryOps.SHR,BinaryOps.SUB,BinaryOps.IDIV,BinaryOps.MOD,BinaryOps.CMPLT,BinaryOps.CMPNE,BinaryOps.AND,BinaryOps.OR}],
-  *[(UPat(UOps.ALU,arg=arg,name='op'), lambda r,op: f"({strip_parens(r[op.src[0]])}{r.symbol_for_op[op.arg]}{strip_parens(r[op.src[1]])})")
+  *[(UPat(UOps.ALU,arg=arg,src=(UPat.var("a"),UPat.var("b")), name='op'),
+     lambda r,op,a,b: f"({strip_parens(r[a]) if a.arg==op.arg else r[a]}{r.symbol_for_op[op.arg]}{strip_parens(r[b]) if b.arg==op.arg else r[b]})")
      for arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}],
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name='op'), lambda r, op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
