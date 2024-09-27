@@ -79,7 +79,7 @@ class dtypes:
   @staticmethod
   def finfo(dtype:DType) -> Tuple[int, int]:  # (exponent, mantissa)
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
-    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
+    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.tfloat32: (8, 10), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   # TODO: priority should be higher than bool
@@ -97,11 +97,12 @@ class dtypes:
   float16: Final[DType] = DType(9, 2, "half", 'e', 1)
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
-  float32: Final[DType] = DType(11, 4, "float", 'f', 1)
-  float64: Final[DType] = DType(12, 8, "double", 'd', 1)
+  tfloat32: Final[DType] = DType(11, 4, "tf32", None, 1)
+  float32: Final[DType] = DType(12, 4, "float", 'f', 1)
+  float64: Final[DType] = DType(13, 8, "double", 'd', 1)
 
   # dtype aliases
-  half = float16; float = float32; double = float64 # noqa: E702
+  half = float16; tf32 = tfloat32; float = float32; double = float64 # noqa: E702
   uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
   char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
@@ -114,7 +115,7 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
-  floats = (float16, bfloat16, float32, float64)
+  floats = (float16, bfloat16, tfloat32, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64, pyint)
   ints = uints + sints

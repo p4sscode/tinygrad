@@ -156,6 +156,26 @@ class TestBFloat16(unittest.TestCase):
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.eye(3))
 
+@unittest.skipUnless(is_dtype_supported(dtypes.tfloat32), "tfloat32 not supported")
+class TestTFloat32(unittest.TestCase):
+  def test_tf32_creation_numpy(self):
+    data = [-1, 1, 2]
+    t = Tensor(data, dtype=dtypes.tfloat32)
+    assert t.dtype == dtypes.tfloat32
+    tnp = t.numpy()
+    assert tnp.dtype == np.float32
+    np.testing.assert_allclose(tnp, np.array(data))
+
+  def test_tf32_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.tfloat32)
+    assert t.dtype == dtypes.tfloat32
+    np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
+
+  def test_tfloat32_eye(self):
+    t = Tensor.eye(3, dtype=dtypes.tfloat32)
+    assert t.dtype == dtypes.tfloat32
+    np.testing.assert_allclose(t.numpy(), np.eye(3))
+
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
