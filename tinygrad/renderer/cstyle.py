@@ -16,7 +16,6 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
 symbol_for_op = {BinaryOps.SHL:"<<", BinaryOps.SHR:">>", BinaryOps.SUB:"-", BinaryOps.IDIV:"/", BinaryOps.MOD:"%", BinaryOps.CMPLT:"<",
                  BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|", BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^",
                  UnaryOps.SQRT:"sqrt", UnaryOps.EXP2:"exp2", UnaryOps.LOG2:"log2", UnaryOps.SIN:"sin"}
-strip_parens_ops = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
@@ -53,18 +52,15 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"({r[op.src[0]]}{symbol_for_op[op.arg]}{r[op.src[1]]})")
-    for arg in symbol_for_op.keys() if arg not in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} and isinstance(arg, BinaryOps)],
   *[(UPat(UOps.ALU, arg=arg, src=(UPat.var("a"), UPat.var("b")), name="op"),lambda r,op,a,b:
-     f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}{symbol_for_op[op.arg]}{strip_parens(r[b]) if b.arg == op.arg else r[b]})")
-     for arg in symbol_for_op.keys() if arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} and isinstance(arg, BinaryOps)],
+    f"({strip_parens(r[a]) if a.arg == op.arg and a.arg in (strip:={BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}) else r[a]} {symbol_for_op[op.arg]}"+ \
+    f"{strip_parens(r[b]) if b.arg == op.arg and b.arg in strip else r[b]})") for arg in symbol_for_op.keys() if isinstance(arg,BinaryOps)],
   *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
     for arg in symbol_for_op.keys() if isinstance(arg, UnaryOps)],
   (UPat(UOps.ALU, arg=UnaryOps.RECIP, name="op"), lambda r,op: f"(1/{r[op.src[0]]})"),
   (UPat(UOps.ALU, arg=UnaryOps.NEG, name="op"), lambda r,op: f"-{r[op.src[0]]}"),
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"), lambda r,op: f"max({r[op.src[0]]},{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="op"), lambda r,op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
-  # (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*([r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -328,6 +324,7 @@ class MetalRenderer(CStyleLanguage):
 #                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
 #                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
+symbol_for_op_half = {UnaryOps.RECIP:"hrcp", UnaryOps.SQRT:"hsqrt", UnaryOps.SIN:"hsin", UnaryOps.LOG2:"hlog2", UnaryOps.EXP2:"hexp2"}
 _nms = "xyzwabcdefghijkl"
 
 class CUDARenderer(CStyleLanguage):
@@ -353,10 +350,8 @@ class CUDARenderer(CStyleLanguage):
   # code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
-  symbol_for_op_half = {UnaryOps.RECIP:"hrcp", UnaryOps.SQRT:"hsqrt", UnaryOps.SIN:"hsin", UnaryOps.LOG2:"hlog2", UnaryOps.EXP2:"hexp2"}
-
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=arg, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
+    *[(UPat(UOps.ALU, arg=arg, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"{symbol_for_op_half[op.arg]}({r[op.src[0]]})")
       for arg in symbol_for_op_half.keys()],
     (UPat(UOps.ALU, arg=BinaryOps.MAX, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"__hmax({r[op.src[0]]}, {r[op.src[1]]})"),
   ]) + base_rewrite
