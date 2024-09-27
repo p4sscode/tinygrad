@@ -195,9 +195,16 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
-                 UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
-                 BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  # code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
+  #                UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
+  #                BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.ALU, arg=UnaryOps.SQRT, dtype=dtypes.float64, name="op"), lambda r,op: f"__builtin_sqrtl({op.src[0]})"),
+    (UPat(UOps.ALU, arg=UnaryOps.SQRT, name="op"), lambda r,op: f"__builtin_sqrtf({op.src[0]})"),
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b")), name="op"), lambda r,op,a,b: f"(({a}>{b})?{a}:{b})"),
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b")), name="op"), lambda r,op,a,b: f"(({a}>{b})?{a}:{b})"),
+  ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -351,7 +358,7 @@ class CUDARenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})") for arg in symbol_for_op_half.keys()],
-    (UPat(UOps.ALU, arg=BinaryOps.MAX, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"__hmax({r[op.src[0]]})"),
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"__hmax({r[op.src[0]]}, {r[op.src[1]]})"),
   ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
