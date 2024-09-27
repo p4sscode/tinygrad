@@ -309,11 +309,14 @@ class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
+  tensor_cores_tf32 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.float, dtype_out=dtypes.float,
+    st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
+    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)]))]
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
   tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
-    upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+    upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]+tensor_cores_tf32
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-1688
   tensor_cores_75 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.half, dtype_out=dtypes.float,
     st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
@@ -344,7 +347,8 @@ class CUDARenderer(CStyleLanguage):
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
-    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_in_map = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_out_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       sza, szb, szc = (prod(sz for _, sz in upc) for upc in upcast_axes)
       dtype_a, dtype_b, dtype_c = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dtype_in,sza),(dtype_in,szb),(dtype_out,szc)))
@@ -354,7 +358,7 @@ class CUDARenderer(CStyleLanguage):
       c_pks = ", ".join([f'"+f"(c.{_nms[i]})' for i in range(szc*dtype_out.itemsize//4)]) # "+f"(c.x), "+f"(c.y), ...
       a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in range(sz*dtype_in.itemsize//4)]) for sz,v in ((sza,'a'),(szb,'b'))) # "r"(a_pk[0]), ...
       prefix.append(f"""__device__ {dtype_c} __{name}({dtype_a} a, {dtype_b} b, {dtype_c} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
-  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dtype_out]}.{dt_map[dtype_in]}.{dt_map[dtype_in]}.{dt_map[dtype_out]}"
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_out_map[dtype_out]}.{dt_in_map[dtype_in]}.{dt_in_map[dtype_in]}.{dt_out_map[dtype_out]}"
       "{{{",".join(operands_c)}}}, {{{",".join(operands_a)}}}, {{{",".join(operands_b)}}}, {{{",".join(operands_c)}}};"
     : {c_pks}\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
 
