@@ -200,9 +200,9 @@ class ClangRenderer(CStyleLanguage):
   #                BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
   string_rewrite = PatternMatcher([
-    (UPat(UOps.ALU, arg=UnaryOps.SQRT, dtype=dtypes.float64, name="op"), lambda r,op: f"__builtin_sqrtl({op.src[0]})"),
-    (UPat(UOps.ALU, arg=UnaryOps.SQRT, name="op"), lambda r,op: f"__builtin_sqrtf({op.src[0]})"),
-    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b"))), lambda r,a,b: f"(({a}>{b})?{a}:{b})"),
+    (UPat(UOps.ALU, arg=UnaryOps.SQRT, dtype=dtypes.float64, name="op"), lambda r,op: f"__builtin_sqrtl({r[op.src[0]]})"),
+    (UPat(UOps.ALU, arg=UnaryOps.SQRT, name="op"), lambda r,op: f"__builtin_sqrtf({r[op.src[0]]})"),
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b"))), lambda r,a,b: f"(({r[a]}>{r[b]})?{r[a]}:{r[b]})"),
   ]) + base_rewrite
 
   if AMX:
