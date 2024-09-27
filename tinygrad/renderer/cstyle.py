@@ -14,8 +14,9 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
 symbol_for_op = {BinaryOps.SHL:"<<", BinaryOps.SHR:">>", BinaryOps.SUB:"-", BinaryOps.IDIV:"/", BinaryOps.MOD:"%", BinaryOps.CMPLT:"<",
-                 BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|"}
-symbol_for_op_conm = {BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^"}
+                 BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|", BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^",
+                 UnaryOps.SQRT:"sqrt", UnaryOps.EXP2:"exp2", UnaryOps.LOG2:"log2", UnaryOps.SIN:"sin"}
+strip_parens_ops = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
@@ -52,14 +53,18 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"({r[op.src[0]]}{symbol_for_op[op.arg]}{r[op.src[1]]})") for arg in symbol_for_op.keys()],
+  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"({r[op.src[0]]}{symbol_for_op[op.arg]}{r[op.src[1]]})")
+    for arg in symbol_for_op.keys() if arg not in strip_parens_ops and isinstance(arg, BinaryOps)],
   *[(UPat(UOps.ALU, arg=arg, src=(UPat.var("a"), UPat.var("b")), name="op"),lambda r,op,a,b:
-     f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}{symbol_for_op_conm[op.arg]}{strip_parens(r[b]) if b.arg == op.arg else r[b]})")
-     for arg in symbol_for_op_conm.keys()],
-
+     f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}{symbol_for_op[op.arg]}{strip_parens(r[b]) if b.arg == op.arg else r[b]})")
+     for arg in symbol_for_op.keys() if arg in strip_parens_ops and isinstance(arg, BinaryOps)],
+  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
+    for arg in symbol_for_op.keys() if isinstance(arg, UnaryOps)],
+  (UPat(UOps.ALU, arg=UnaryOps.RECIP, name="op"), lambda r,op: f"(1/{r[op.src[0]]})"),
+  (UPat(UOps.ALU, arg=UnaryOps.NEG, name="op"), lambda r,op: f"-{r[op.src[0]]}"),
+  (UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"), lambda r,op: f"max({r[op.src[0]]},{r[op.src[1]]})"),
   (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="op"), lambda r,op: f"({r[op.src[0]]}?{r[op.src[1]]}:{r[op.src[2]]})"),
-
-  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*([r[v] for v in x.src]), x.dtype)),
+  # (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*([r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -94,13 +99,15 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = {
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-    UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    # UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
+    # UnaryOps.NEG: lambda x,dtype: f"-{x}",
+    # UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    # UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
+    # UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    # UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     # BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
     # BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
-    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
+    # BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     # BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     # BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     # BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
@@ -285,7 +292,7 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  # code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -296,6 +303,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + extra_pm
 
   string_rewrite = PatternMatcher([
+    (UPat(UOps.ALU, arg=UnaryOps.SIN, name="op"), lambda r,op: f"precise::sin({r[op.src[0]]})"),
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
@@ -307,12 +315,12 @@ class MetalRenderer(CStyleLanguage):
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
-                    BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
-                    UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
+# code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
+#                     BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
+#                     UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
+#                     UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
+#                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
+#                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
 
@@ -336,8 +344,15 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
+  # code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
+
+  symbol_for_op_half = {UnaryOps.RECIP:"hrcp", UnaryOps.SQRT:"hsqrt", UnaryOps.SIN:"hsin", UnaryOps.LOG2:"hlog2", UnaryOps.EXP2:"hexp2"}
+
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})") for arg in symbol_for_op_half.keys()],
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"__hmax({r[op.src[0]]})"),
+  ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
