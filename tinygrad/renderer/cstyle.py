@@ -54,10 +54,10 @@ base_rewrite = PatternMatcher([
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
   *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"({r[op.src[0]]}{symbol_for_op[op.arg]}{r[op.src[1]]})")
-    for arg in symbol_for_op.keys() if arg not in strip_parens_ops and isinstance(arg, BinaryOps)],
+    for arg in symbol_for_op.keys() if arg not in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} and isinstance(arg, BinaryOps)],
   *[(UPat(UOps.ALU, arg=arg, src=(UPat.var("a"), UPat.var("b")), name="op"),lambda r,op,a,b:
      f"({strip_parens(r[a]) if a.arg == op.arg else r[a]}{symbol_for_op[op.arg]}{strip_parens(r[b]) if b.arg == op.arg else r[b]})")
-     for arg in symbol_for_op.keys() if arg in strip_parens_ops and isinstance(arg, BinaryOps)],
+     for arg in symbol_for_op.keys() if arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} and isinstance(arg, BinaryOps)],
   *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
     for arg in symbol_for_op.keys() if isinstance(arg, UnaryOps)],
   (UPat(UOps.ALU, arg=UnaryOps.RECIP, name="op"), lambda r,op: f"(1/{r[op.src[0]]})"),
@@ -202,8 +202,7 @@ class ClangRenderer(CStyleLanguage):
   string_rewrite = PatternMatcher([
     (UPat(UOps.ALU, arg=UnaryOps.SQRT, dtype=dtypes.float64, name="op"), lambda r,op: f"__builtin_sqrtl({op.src[0]})"),
     (UPat(UOps.ALU, arg=UnaryOps.SQRT, name="op"), lambda r,op: f"__builtin_sqrtf({op.src[0]})"),
-    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b")), name="op"), lambda r,op,a,b: f"(({a}>{b})?{a}:{b})"),
-    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b")), name="op"), lambda r,op,a,b: f"(({a}>{b})?{a}:{b})"),
+    (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b"))), lambda r,a,b: f"(({a}>{b})?{a}:{b})"),
   ]) + base_rewrite
 
   if AMX:
@@ -357,7 +356,8 @@ class CUDARenderer(CStyleLanguage):
   symbol_for_op_half = {UnaryOps.RECIP:"hrcp", UnaryOps.SQRT:"hsqrt", UnaryOps.SIN:"hsin", UnaryOps.LOG2:"hlog2", UnaryOps.EXP2:"hexp2"}
 
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})") for arg in symbol_for_op_half.keys()],
+    *[(UPat(UOps.ALU, arg=arg, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
+      for arg in symbol_for_op_half.keys()],
     (UPat(UOps.ALU, arg=BinaryOps.MAX, dtype=(dtypes.half, dtypes.bfloat16), name="op"), lambda r,op: f"__hmax({r[op.src[0]]}, {r[op.src[1]]})"),
   ]) + base_rewrite
 
