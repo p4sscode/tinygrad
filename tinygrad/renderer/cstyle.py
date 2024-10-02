@@ -7,17 +7,16 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
-STRIP_PARENS_OPS = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
-
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
-def render_alu(r, x):
+def render_alu(r:CStyleLanguage, x:UOp) -> str:
   key = tuple(key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1])
-  return r.code_for_op[key[0] if key else (x.arg,None)](*[strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src])
+  srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
+  return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
