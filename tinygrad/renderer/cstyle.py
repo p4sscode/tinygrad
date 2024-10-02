@@ -452,9 +452,13 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer().code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
-                 UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
-                 UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+  code_for_op = {**ClangRenderer().code_for_op, (UnaryOps.SIN,None): lambda x:f"__builtin_sin({x})",
+    (UnaryOps.LOG2,(dtypes.float64,)): lambda x:f"__builtin_log2l({x})", (UnaryOps.LOG2,None): lambda x,:f"__builtin_log2f({x})",
+    (UnaryOps.EXP2,(dtypes.float64,)): lambda x:f"__builtin_exp2l({x})", (UnaryOps.EXP2,None): lambda x,:f"__builtin_exp2f({x})"}
+
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
+    ]) + base_rewrite
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
