@@ -180,6 +180,7 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {(UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
     **({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
     (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})", (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
+
   string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
 
   if AMX:
@@ -225,7 +226,7 @@ class OpenCLRenderer(CStyleLanguage):
       lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
     (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
       lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});"),
-  ]) + base_rewrite
+  ]) + CStyleLanguage.string_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
