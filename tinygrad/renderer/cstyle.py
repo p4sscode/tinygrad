@@ -177,8 +177,8 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
-    (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})", (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
-    (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
+    (UnaryOps.SQRT,(dtypes.float64,)): lambda x:f"__builtin_sqrtl({x})", (UnaryOps.SQRT,None): lambda x:f"__builtin_sqrtf({x})",
+    (BinaryOps.MAX,None): lambda a,b:f"(({a}>{b})?{a}:{b})",}
 
   string_rewrite = PatternMatcher([
     # sorts dtyped keys first
@@ -277,7 +277,7 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN, None): lambda x: f"precise::sin({x})"}
+  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN,None): lambda x:f"precise::sin({x})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -322,9 +322,9 @@ class CUDARenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage().code_for_op,
-    (UnaryOps.RECIP,(dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})", (BinaryOps.MAX,(dtypes.half, dtypes.bfloat16)): lambda x: f"__hmax({x})",
-    (UnaryOps.SQRT,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
-    (UnaryOps.LOG2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hexp2({x})"}
+    (UnaryOps.RECIP,(dtypes.half,dtypes.bfloat16)): lambda x:f"hrcp({x})", (BinaryOps.MAX,(dtypes.half,dtypes.bfloat16)):lambda x: f"__hmax({x})",
+    (UnaryOps.SQRT,(dtypes.half,dtypes.bfloat16)): lambda x:f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half,dtypes.bfloat16)):lambda x: f"hsin({x})",
+    (UnaryOps.LOG2,(dtypes.half,dtypes.bfloat16)): lambda x:f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half,dtypes.bfloat16)):lambda x: f"hexp2({x})"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
