@@ -18,7 +18,7 @@ def render_alu(r:CStyleLanguage, x:UOp) -> str:
   srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
   return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
 
-def sort_alu_keys(keys): return sorted(keys, key=lambda k: (k[0], k[1] is None, () if k[1] is None else k[1]))
+def sort_alu_keys(keys): return sorted(keys, key=lambda k: (k[0], k[1] is None, k[1] or ()))
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
