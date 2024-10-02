@@ -401,7 +401,6 @@ class AMDRenderer(CStyleLanguage):
   ]) + extra_pm
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)],
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
   def render_vector_prefix(self, dtype:DType) -> str:
