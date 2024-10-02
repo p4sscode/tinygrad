@@ -18,6 +18,8 @@ def render_alu(r:CStyleLanguage, x:UOp) -> str:
   srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
   return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
 
+def sort_alu_keys(keys): return sorted(keys, key=lambda k: (k[0], k[1] is None, () if k[1] is None else k[1]))
+
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -180,7 +182,9 @@ class ClangRenderer(CStyleLanguage):
     **({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
     (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})", (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
 
-  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())]
+    ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -283,9 +287,9 @@ class MetalRenderer(CStyleLanguage):
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
       for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
   ]) + extra_pm
-
+  # sorted(code_for_op.keys(), key=lambda k: (k[0], k[1] is None, () if k[1] is None else k[1]))
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()],
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())],
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
@@ -319,14 +323,16 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {
+
+  code_for_op = {**CStyleLanguage().code_for_op,
     (UnaryOps.RECIP,(dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})", (BinaryOps.MAX,(dtypes.half, dtypes.bfloat16)): lambda x: f"__hmax({x})",
     (UnaryOps.SQRT,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
     (UnaryOps.LOG2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hexp2({x})",
-    **CStyleLanguage().code_for_op}
+    }
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
-
-  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())]
+    ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
