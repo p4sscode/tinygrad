@@ -48,8 +48,6 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
-    *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -84,18 +82,22 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = {
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-    UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
-    BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
-    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
+    (UnaryOps.SQRT, None): lambda x: f"sqrt({x})",
+    (UnaryOps.RECIP, None): lambda x: f"(1/{x})",
+    (UnaryOps.NEG, None): lambda x: f"-{x}",
+    (UnaryOps.EXP2, None): lambda x: f"exp2({x})", (UnaryOps.LOG2, None): lambda x: f"log2({x})", (UnaryOps.SIN, None): lambda x: f"sin({x})",
+    (BinaryOps.SHL, None): lambda a,b: f"({a}<<{b})", (BinaryOps.SHR, None): lambda a,b: f"({a}>>{b})",
+    (BinaryOps.ADD, None): lambda a,b: f"({a}+{b})", (BinaryOps.SUB, None): lambda a,b: f"({a}-{b})", (BinaryOps.MAX, None): lambda a,b: f"max({a},{b})", # noqa:E501
+    (BinaryOps.IDIV, None): lambda a,b: f"({a}/{b})", (BinaryOps.MUL, None): lambda a,b: f"({a}*{b})", (BinaryOps.MOD, None): lambda a,b: f"({a}%{b})", # noqa:E501
+    (BinaryOps.CMPLT, None): lambda a,b: f"({a}<{b})", (BinaryOps.CMPNE, None): lambda a,b: f"({a}!={b})", (BinaryOps.XOR, None): lambda a,b: f"({a}^{b})", # noqa:E501
+    (BinaryOps.AND, None): lambda a,b: f"({a}&{b})", (BinaryOps.OR, None): lambda a,b: f"({a}|{b})",
+    (TernaryOps.WHERE, None): lambda a,b,c: f"({a}?{b}:{c})"}
 
-  string_rewrite = base_rewrite
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[x.op](
+      *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[v] for v in x.src]), x.dtype))
+      for op, dtype in code_for_op.items()]
+  ]) + base_rewrite
   extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
@@ -176,9 +178,10 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
-                 UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
-                 BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
+  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
+                 (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
+                 (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
+                 (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
