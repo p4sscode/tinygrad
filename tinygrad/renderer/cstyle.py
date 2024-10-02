@@ -18,9 +18,6 @@ def render_alu(r:CStyleLanguage, x:UOp) -> str:
   srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
   return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
 
-# List[Tuple[Union[UnaryOps, BinaryOps, TernaryOps], Optional[Tuple[DType,...]]]]
-def sort_alu_keys(keys): return sorted(keys, key=lambda k: (k[0], k[1] is None, k[1] or ()))
-
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -180,11 +177,12 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
-    (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
-    (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})", (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
+    (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})", (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
+    (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
 
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())]
+    # sorts dtyped keys first
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
     ]) + base_rewrite
 
   if AMX:
@@ -289,7 +287,7 @@ class MetalRenderer(CStyleLanguage):
       for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
   ]) + extra_pm
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())],
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)],
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
@@ -331,7 +329,7 @@ class CUDARenderer(CStyleLanguage):
     }
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())]
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
     ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
