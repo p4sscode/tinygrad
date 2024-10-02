@@ -284,8 +284,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + extra_pm
 
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
-      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()],
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()],
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
