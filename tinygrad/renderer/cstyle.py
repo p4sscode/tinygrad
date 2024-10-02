@@ -384,12 +384,12 @@ class AMDRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   code_for_op = { **CStyleLanguage().code_for_op,
     (UnaryOps.SQRT,(dtypes.half,)): lambda x:f"__ocml_sqrt_f16({x})", (UnaryOps.SQRT,(dtypes.double,)): lambda x:f"__ocml_sqrt_f64({x})",
-    (UnaryOps.SIN,(dtypes.half,)): lambda x:f"__ocml_sin_f16({x})", (UnaryOps.SIN,(dtypes.double,)): lambda x:f"__ocml_sin_f64({x})",
-    (UnaryOps.LOG2,(dtypes.half,)): lambda x:f"__ocml_log2_16({x})", (UnaryOps.LOG2,(dtypes.double,)): lambda x:f"__ocml_log2_64({x})",
+    (UnaryOps.LOG2,(dtypes.half,)): lambda x:f"__ocml_log2_f16({x})", (UnaryOps.LOG2,(dtypes.double,)): lambda x:f"__ocml_log2_f64({x})",
     (UnaryOps.EXP2,(dtypes.half,)): lambda x:f"__ocml_exp2_f16({x})", (UnaryOps.EXP2,(dtypes.double,)): lambda x:f"__ocml_exp2_f64({x})",
+    (UnaryOps.SIN,(dtypes.half,)): lambda x:f"__ocml_sin_f16({x})", (UnaryOps.SIN,(dtypes.double,)): lambda x:f"__ocml_sin_f64({x})",
     (BinaryOps.MAX,(dtypes.half,)): lambda a,b:f"__ocml_fmax_f16({a},{b})", (BinaryOps.MAX,(dtypes.double,)): lambda a,b:f"__ocml_fmax_f64({a},{b})",
-    (UnaryOps.SQRT,None): lambda x:f"__ocml_sqrt_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
-    (UnaryOps.LOG2,None): lambda x:f"__ocml_log2_32({x})", (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})",
+    (UnaryOps.SQRT,None): lambda x:f"__ocml_sqrt_f32({x})", (UnaryOps.LOG2,None): lambda x:f"__ocml_log2_32({x})",
+    (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
   # upcast to float32 all the ops that don't support bfloat16
