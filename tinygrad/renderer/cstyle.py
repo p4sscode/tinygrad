@@ -69,7 +69,7 @@ extra_pm = PatternMatcher([
 
 def render_alu(r, x):
   key = tuple(x.arg == key[0] and x.dtype in key[1] for key in r.code_for_op.keys() if key[1] is not None)
-  return r.code_for_op[key[0] if key else (x.arg,None)](*([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))
+  return r.code_for_op[key[0] if key else (x.arg,None)](*[strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src])
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
