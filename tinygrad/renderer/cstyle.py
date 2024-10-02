@@ -82,15 +82,13 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = {
-    (UnaryOps.SQRT, None): lambda x: f"sqrt({x})", (UnaryOps.RECIP, None): lambda x: f"(1/{x})", (UnaryOps.NEG, None): lambda x: f"-{x}",
-    (UnaryOps.EXP2, None): lambda x: f"exp2({x})", (UnaryOps.LOG2, None): lambda x: f"log2({x})", (UnaryOps.SIN, None): lambda x: f"sin({x})",
-    (BinaryOps.SHL, None): lambda a,b: f"({a}<<{b})", (BinaryOps.SHR, None): lambda a,b: f"({a}>>{b})",
-    (BinaryOps.ADD, None): lambda a,b: f"({a}+{b})", (BinaryOps.SUB, None): lambda a,b: f"({a}-{b})",
-    (BinaryOps.MAX, None): lambda a,b: f"max({a},{b})", (BinaryOps.IDIV, None): lambda a,b: f"({a}/{b})",
-    (BinaryOps.MUL, None): lambda a,b: f"({a}*{b})", (BinaryOps.MOD, None): lambda a,b: f"({a}%{b})",
-    (BinaryOps.CMPLT, None): lambda a,b: f"({a}<{b})", (BinaryOps.CMPNE, None): lambda a,b: f"({a}!={b})",
-    (BinaryOps.XOR, None): lambda a,b: f"({a}^{b})", (BinaryOps.AND, None): lambda a,b: f"({a}&{b})", (BinaryOps.OR, None): lambda a,b: f"({a}|{b})",
-    (TernaryOps.WHERE, None): lambda a,b,c: f"({a}?{b}:{c})"}
+    (UnaryOps.SQRT,None): lambda x:f"sqrt({x})", (UnaryOps.RECIP,None): lambda x:f"(1/{x})", (UnaryOps.NEG,None): lambda x:f"-{x}",
+    (UnaryOps.EXP2,None): lambda x:f"exp2({x})", (UnaryOps.LOG2,None): lambda x:f"log2({x})", (UnaryOps.SIN,None): lambda x:f"sin({x})",
+    (BinaryOps.SHL,None): lambda a,b:f"({a}<<{b})", (BinaryOps.SHR,None): lambda a,b:f"({a}>>{b})", (BinaryOps.ADD,None): lambda a,b:f"({a}+{b})",
+    (BinaryOps.SUB, None): lambda a,b:f"({a}-{b})", (BinaryOps.MAX,None): lambda a,b:f"max({a},{b})", (BinaryOps.IDIV,None): lambda a,b:f"({a}/{b})",
+    (BinaryOps.MUL,None): lambda a,b:f"({a}*{b})", (BinaryOps.MOD,None): lambda a,b:f"({a}%{b})", (BinaryOps.CMPLT,None): lambda a,b:f"({a}<{b})",
+    (BinaryOps.CMPNE,None): lambda a,b:f"({a}!={b})", (BinaryOps.XOR,None): lambda a,b:f"({a}^{b})", (BinaryOps.AND,None): lambda a,b:f"({a}&{b})",
+    (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
 
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
