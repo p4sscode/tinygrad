@@ -324,8 +324,7 @@ class CUDARenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op,
     (UnaryOps.RECIP,(dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})", (BinaryOps.MAX,(dtypes.half, dtypes.bfloat16)): lambda x: f"__hmax({x})",
     (UnaryOps.SQRT,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
-    (UnaryOps.LOG2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hexp2({x})",
-    }
+    (UnaryOps.LOG2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hexp2({x})"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
