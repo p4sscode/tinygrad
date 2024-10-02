@@ -13,6 +13,8 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
+STRIP_PARENS_OPS = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
+
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -92,7 +94,7 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
-      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in COMMUTATIVE else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
+      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
   ]) + base_rewrite
   extra_matcher = extra_pm
 
@@ -174,14 +176,14 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  # code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
-  #                (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
-  #                (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
-  #                (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
-  code_for_op = {**CStyleLanguage().code_for_op,
+  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
                  (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
                  (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
                  (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
+      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
+  ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -273,9 +275,7 @@ class MetalRenderer(CStyleLanguage):
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
-
-  # precise::sin
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN, None): lambda x: f"precise::sin({x})"} # precise::sin
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -286,6 +286,8 @@ class MetalRenderer(CStyleLanguage):
   ]) + extra_pm
 
   string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
+      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()],
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
