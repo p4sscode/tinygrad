@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, COMMUTATIVE
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -67,6 +67,10 @@ extra_pm = PatternMatcher([
     lambda store: UOp(UOps.STORE, src=store.src[:3]+(UOp(UOps.IF, src=(store.src[3],)),))),
 ])
 
+def render_alu(r, uop):
+  key = tuple(uop.arg == key[0] and uop.dtype in key[1] for key in r.code_for_op.keys() if key[1] is not None)[0]
+  return r.code_for_op[key or (uop.arg,None)](*([strip_parens(r[v]) if v.arg==uop.arg and uop.arg in STRIP_PARENS_OPS else r[v] for v in uop.src]))
+
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
   buffer_prefix: str = ""
@@ -92,10 +96,7 @@ class CStyleLanguage(Renderer):
     (BinaryOps.CMPNE,None): lambda a,b:f"({a}!={b})", (BinaryOps.XOR,None): lambda a,b:f"({a}^{b})", (BinaryOps.AND,None): lambda a,b:f"({a}&{b})",
     (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
 
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
-      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
-  ]) + base_rewrite
+  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
   extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
