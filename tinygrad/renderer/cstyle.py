@@ -67,9 +67,9 @@ extra_pm = PatternMatcher([
     lambda store: UOp(UOps.STORE, src=store.src[:3]+(UOp(UOps.IF, src=(store.src[3],)),))),
 ])
 
-def render_alu(r, uop):
-  key = tuple(uop.arg == key[0] and uop.dtype in key[1] for key in r.code_for_op.keys() if key[1] is not None)[0]
-  return r.code_for_op[key or (uop.arg,None)](*([strip_parens(r[v]) if v.arg==uop.arg and uop.arg in STRIP_PARENS_OPS else r[v] for v in uop.src]))
+def render_alu(r, x):
+  key = tuple(x.arg == key[0] and x.dtype in key[1] for key in r.code_for_op.keys() if key[1] is not None)
+  return r.code_for_op[key[0] if key else (x.arg,None)](*([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -177,7 +177,7 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
+  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
                  (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
                  (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
                  (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
