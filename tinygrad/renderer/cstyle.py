@@ -18,6 +18,7 @@ def render_alu(r:CStyleLanguage, x:UOp) -> str:
   srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
   return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
 
+# List[Tuple[Union[UnaryOps, BinaryOps, TernaryOps], Optional[Tuple[DType,...]]]]
 def sort_alu_keys(keys): return sorted(keys, key=lambda k: (k[0], k[1] is None, k[1] or ()))
 
 base_rewrite = PatternMatcher([
@@ -287,7 +288,6 @@ class MetalRenderer(CStyleLanguage):
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
       for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
   ]) + extra_pm
-  # sorted(code_for_op.keys(), key=lambda k: (k[0], k[1] is None, () if k[1] is None else k[1]))
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sort_alu_keys(code_for_op.keys())],
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
