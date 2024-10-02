@@ -382,7 +382,7 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  code_for_op = {
+  code_for_op = { **CStyleLanguage().code_for_op,
     (UnaryOps.SQRT,(dtypes.half,)): lambda x:f"__ocml_sqrt_f16({x})", (UnaryOps.SQRT,(dtypes.double,)): lambda x:f"__ocml_sqrt_f64({x})",
     (UnaryOps.SIN,(dtypes.half,)): lambda x:f"__ocml_sin_f16({x})", (UnaryOps.SIN,(dtypes.double,)): lambda x:f"__ocml_sin_f64({x})",
     (UnaryOps.LOG2,(dtypes.half,)): lambda x:f"__ocml_log2_16({x})", (UnaryOps.LOG2,(dtypes.double,)): lambda x:f"__ocml_log2_64({x})",
