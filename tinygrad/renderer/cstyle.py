@@ -178,8 +178,8 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {(UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
-    **({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
+  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
+    (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
     (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})", (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})",}
 
   string_rewrite = PatternMatcher([
