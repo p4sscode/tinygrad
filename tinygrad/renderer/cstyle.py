@@ -358,23 +358,6 @@ return c;}}""")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    # TODO: MAX with int uses fmax_f32?
-                    BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",}
-
-def _make_hip_code_for_op():
-  def wrapper(key, func):
-    def cast_bf16(*args):
-      if args[-1] == dtypes.bfloat16:
-        operands = tuple(f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
-        return f"(hip_bfloat16)({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
-      return func(*args)
-    return cast_bf16
-  return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -393,13 +376,33 @@ class AMDRenderer(CStyleLanguage):
   kernel_prefix += '\nextern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = _make_hip_code_for_op()
   smem_prefix = "__attribute__((shared))"
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  code_for_op = {
+    (UnaryOps.SQRT,(dtypes.half,)): lambda x:f"__ocml_sqrt_f16({x})", (UnaryOps.SQRT,(dtypes.double,)): lambda x:f"__ocml_sqrt_f64({x})",
+    (UnaryOps.SIN,(dtypes.half,)): lambda x:f"__ocml_sin_f16({x})", (UnaryOps.SIN,(dtypes.double,)): lambda x:f"__ocml_sin_f64({x})",
+    (UnaryOps.LOG2,(dtypes.half,)): lambda x:f"__ocml_log2_16({x})", (UnaryOps.LOG2,(dtypes.double,)): lambda x:f"__ocml_log2_64({x})",
+    (UnaryOps.EXP2,(dtypes.half,)): lambda x:f"__ocml_exp2_f16({x})", (UnaryOps.EXP2,(dtypes.double,)): lambda x:f"__ocml_exp2_f64({x})",
+    (BinaryOps.MAX,(dtypes.half,)): lambda a,b:f"__ocml_fmax_f16({a},{b})", (BinaryOps.MAX,(dtypes.double,)): lambda a,b:f"__ocml_fmax_f64({a},{b})",
+    (UnaryOps.SQRT,None): lambda x:f"__ocml_sqrt_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
+    (UnaryOps.LOG2,None): lambda x:f"__ocml_log2_32({x})", (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})",
+    (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
+
+  # upcast to float32 all the ops that don't support bfloat16
+  extra_matcher = PatternMatcher([
+    # NOTE: this is copied from PTX
+    *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
+      for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
+  ]) + extra_pm
+  string_rewrite = PatternMatcher([
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)],
+    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
+  ]) + base_rewrite
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
