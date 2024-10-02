@@ -272,7 +272,9 @@ class MetalRenderer(CStyleLanguage):
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
-  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN, None): lambda x: f"precise::sin({x})"} # precise::sin
+
+  # precise::sin
+  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN, None): lambda x: f"precise::sin({x})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -317,7 +319,6 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-
   code_for_op = {
     (UnaryOps.RECIP,(dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})", (BinaryOps.MAX,(dtypes.half, dtypes.bfloat16)): lambda x: f"__hmax({x})",
     (UnaryOps.SQRT,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
