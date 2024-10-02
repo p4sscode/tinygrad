@@ -82,21 +82,20 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = {
-    (UnaryOps.SQRT, None): lambda x: f"sqrt({x})",
-    (UnaryOps.RECIP, None): lambda x: f"(1/{x})",
-    (UnaryOps.NEG, None): lambda x: f"-{x}",
+    (UnaryOps.SQRT, None): lambda x: f"sqrt({x})", (UnaryOps.RECIP, None): lambda x: f"(1/{x})", (UnaryOps.NEG, None): lambda x: f"-{x}",
     (UnaryOps.EXP2, None): lambda x: f"exp2({x})", (UnaryOps.LOG2, None): lambda x: f"log2({x})", (UnaryOps.SIN, None): lambda x: f"sin({x})",
     (BinaryOps.SHL, None): lambda a,b: f"({a}<<{b})", (BinaryOps.SHR, None): lambda a,b: f"({a}>>{b})",
-    (BinaryOps.ADD, None): lambda a,b: f"({a}+{b})", (BinaryOps.SUB, None): lambda a,b: f"({a}-{b})", (BinaryOps.MAX, None): lambda a,b: f"max({a},{b})", # noqa:E501
-    (BinaryOps.IDIV, None): lambda a,b: f"({a}/{b})", (BinaryOps.MUL, None): lambda a,b: f"({a}*{b})", (BinaryOps.MOD, None): lambda a,b: f"({a}%{b})", # noqa:E501
-    (BinaryOps.CMPLT, None): lambda a,b: f"({a}<{b})", (BinaryOps.CMPNE, None): lambda a,b: f"({a}!={b})", (BinaryOps.XOR, None): lambda a,b: f"({a}^{b})", # noqa:E501
-    (BinaryOps.AND, None): lambda a,b: f"({a}&{b})", (BinaryOps.OR, None): lambda a,b: f"({a}|{b})",
+    (BinaryOps.ADD, None): lambda a,b: f"({a}+{b})", (BinaryOps.SUB, None): lambda a,b: f"({a}-{b})",
+    (BinaryOps.MAX, None): lambda a,b: f"max({a},{b})", (BinaryOps.IDIV, None): lambda a,b: f"({a}/{b})",
+    (BinaryOps.MUL, None): lambda a,b: f"({a}*{b})", (BinaryOps.MOD, None): lambda a,b: f"({a}%{b})",
+    (BinaryOps.CMPLT, None): lambda a,b: f"({a}<{b})", (BinaryOps.CMPNE, None): lambda a,b: f"({a}!={b})",
+    (BinaryOps.XOR, None): lambda a,b: f"({a}^{b})", (BinaryOps.AND, None): lambda a,b: f"({a}&{b})", (BinaryOps.OR, None): lambda a,b: f"({a}|{b})",
     (TernaryOps.WHERE, None): lambda a,b,c: f"({a}?{b}:{c})"}
 
   string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[x.op](
-      *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[v] for v in x.src]), x.dtype))
-      for op, dtype in code_for_op.items()]
+    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
+      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[v] for v in x.src])))
+      for op, dtype in code_for_op.keys()]
   ]) + base_rewrite
   extra_matcher = extra_pm
 
@@ -178,7 +177,11 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
+  # code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
+  #                (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
+  #                (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
+  #                (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
+  code_for_op = {**CStyleLanguage().code_for_op,
                  (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
                  (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
                  (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
