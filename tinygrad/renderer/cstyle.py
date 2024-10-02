@@ -13,9 +13,10 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
-symbol_for_op = {BinaryOps.SHL:"<<", BinaryOps.SHR:">>", BinaryOps.SUB:"-", BinaryOps.IDIV:"/", BinaryOps.MOD:"%", BinaryOps.CMPLT:"<",
-                 BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|", BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^",
-                 UnaryOps.SQRT:"sqrt", UnaryOps.EXP2:"exp2", UnaryOps.LOG2:"log2", UnaryOps.SIN:"sin"}
+base_symbol_for_op = {BinaryOps.SHL:"<<", BinaryOps.SHR:">>", BinaryOps.SUB:"-", BinaryOps.IDIV:"/", BinaryOps.MOD:"%", BinaryOps.CMPLT:"<",
+  BinaryOps.CMPNE:"!=", BinaryOps.AND:"&", BinaryOps.OR:"|", BinaryOps.ADD:"+", BinaryOps.MUL:"*", BinaryOps.XOR:"^", UnaryOps.SQRT:"sqrt",
+  UnaryOps.EXP2:"exp2", UnaryOps.LOG2:"log2", UnaryOps.SIN:"sin"}
+strip_parens_ops = {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
@@ -53,10 +54,10 @@ base_rewrite = PatternMatcher([
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
   *[(UPat(UOps.ALU, arg=arg, src=(UPat.var("a"), UPat.var("b")), name="op"),lambda r,op,a,b:
-    f"({strip_parens(r[a]) if a.arg == op.arg and a.arg in (strip:={BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}) else r[a]} {symbol_for_op[op.arg]}"+ \
-     f"{strip_parens(r[b]) if b.arg == op.arg and b.arg in strip else r[b]})") for arg in symbol_for_op.keys() if isinstance(arg,BinaryOps)],
-  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{symbol_for_op[op.arg]}({r[op.src[0]]})")
-    for arg in symbol_for_op.keys() if isinstance(arg, UnaryOps)],
+    f"({strip_parens(r[a]) if a.arg==op.arg and a.arg in strip_parens_ops else r[a]} {r.symbol_for_op[op.arg]}"+ \
+     f"{strip_parens(r[b]) if b.arg==op.arg and b.arg in strip_parens_ops else r[b]})") for arg in base_symbol_for_op.keys() if isinstance(arg,BinaryOps)], # noqa: E501
+  *[(UPat(UOps.ALU, arg=arg, name="op"), lambda r,op: f"{r.symbol_for_op[op.arg]}({r[op.src[0]]})")
+    for arg in base_symbol_for_op.keys() if isinstance(arg, UnaryOps)],
   (UPat(UOps.ALU, arg=UnaryOps.RECIP, name="op"), lambda r,op: f"(1/{r[op.src[0]]})"),
   (UPat(UOps.ALU, arg=UnaryOps.NEG, name="op"), lambda r,op: f"-{r[op.src[0]]}"),
   (UPat(UOps.ALU, arg=BinaryOps.MAX, name="op"), lambda r,op: f"max({r[op.src[0]]},{r[op.src[1]]})"),
@@ -96,6 +97,7 @@ class CStyleLanguage(Renderer):
   nan: str = "NAN"
   code_for_op: Dict = {}
 
+  symbol_for_op = base_symbol_for_op
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
 
@@ -177,10 +179,10 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.SQRT: "__builtin_sqrtf"}
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.ALU, arg=UnaryOps.SQRT, dtype=dtypes.float64, name="op"), lambda r,op: f"__builtin_sqrtl({r[op.src[0]]})"),
-    (UPat(UOps.ALU, arg=UnaryOps.SQRT, name="op"), lambda r,op: f"__builtin_sqrtf({r[op.src[0]]})"),
     (UPat(UOps.ALU, arg=BinaryOps.MAX, src=(UPat.var("a"), UPat.var("b"))), lambda r,a,b: f"(({r[a]}>{r[b]})?{r[a]}:{r[b]})"),
   ]) + base_rewrite
 
@@ -274,9 +276,9 @@ class MetalRenderer(CStyleLanguage):
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
+  symbol_for_op = {**CStyleLanguage().symbol_for_op, UnaryOps.SIN: "precise::sin"} # precise::sin
 
   string_rewrite = PatternMatcher([
-    (UPat(UOps.ALU, arg=UnaryOps.SIN, name="op"), lambda r,op: f"precise::sin({r[op.src[0]]})"), # precise::sin
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
   ]) + base_rewrite
 
