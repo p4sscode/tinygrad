@@ -7,13 +7,17 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
+STRIP_PARENS_OPS = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
+
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
-STRIP_PARENS_OPS = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR}
+def render_alu(r, x):
+  key = tuple(key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1])
+  return r.code_for_op[key[0] if key else (x.arg,None)](*[strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src])
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
@@ -66,10 +70,6 @@ extra_pm = PatternMatcher([
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(UOps.STORE, src=store.src[:3]+(UOp(UOps.IF, src=(store.src[3],)),))),
 ])
-
-def render_alu(r, x):
-  key = tuple(x.arg == key[0] and x.dtype in key[1] for key in r.code_for_op.keys() if key[1] is not None)
-  return r.code_for_op[key[0] if key else (x.arg,None)](*[strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src])
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -296,13 +296,6 @@ class MetalRenderer(CStyleLanguage):
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"1/{x}",
-                    BinaryOps.MAX: lambda a,b,dtype: f"__hmax({a},{b})" if dtype in (dtypes.half, dtypes.bfloat16) else f"max({a},{b})",
-                    UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
-
 _nms = "xyzwabcdefghijkl"
 
 class CUDARenderer(CStyleLanguage):
@@ -325,8 +318,15 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
+
+  code_for_op = {
+    (UnaryOps.RECIP,(dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})", (BinaryOps.MAX,(dtypes.half, dtypes.bfloat16)): lambda x: f"__hmax({x})",
+    (UnaryOps.SQRT,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
+    (UnaryOps.LOG2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half, dtypes.bfloat16)): lambda x: f"hexp2({x})",
+    **CStyleLanguage().code_for_op}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
+
+  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
