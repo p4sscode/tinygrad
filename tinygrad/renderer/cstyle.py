@@ -178,13 +178,10 @@ class ClangRenderer(CStyleLanguage):
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in [UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2]}),
-                 (UnaryOps.SQRT, dtypes.float64): lambda x: f"__builtin_sqrtl({x})",
+                 (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})",
                  (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})",
                  (BinaryOps.MAX, None): lambda a,b: f"(({a}>{b})?{a}:{b})"}
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
-      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in STRIP_PARENS_OPS else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
-  ]) + base_rewrite
+  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
