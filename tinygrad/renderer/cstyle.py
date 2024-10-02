@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, COMMUTATIVE
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -92,8 +92,7 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = PatternMatcher([
     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),lambda r,x: r.code_for_op[(x.arg,x.dtype) if (x.arg,x.dtype) in r.code_for_op else (x.arg,None)](
-      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[v] for v in x.src])))
-      for op, dtype in code_for_op.keys()]
+      *([strip_parens(r[v]) if v.arg==x.arg and x.arg in COMMUTATIVE else r[v] for v in x.src]))) for op, dtype in code_for_op.keys()]
   ]) + base_rewrite
   extra_matcher = extra_pm
 
