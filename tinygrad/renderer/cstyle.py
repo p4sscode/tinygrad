@@ -343,11 +343,11 @@ class CUDARenderer(CStyleLanguage):
       upcs = (prod(sz for _, sz in upc) for upc in upcast_axes)
       dts = tuple(self.render_dtype(dt.vec(upc)) for dt,upc in zip([dtype_in,dtype_in,dtype_out],upcs))
       szs = tuple(upc*dt.itemsize//4 for dt,upc in zip([dtype_in,dtype_in,dtype_out],upcs))
-      operands = [f"%{i}" for i in range(sum(szs))]
+      args = [f"%{i}" for i in range(sum(szs))]
 
       prefix.append(f"""__device__ {dts[2]} __{name}({dts[0]} a, {dts[1]} b, {dts[2]} c){{
   int *a_pk = (int *)(&a), *b_pk = (int *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32"
-      "{{{", ".join(operands[:szs[2]])}}}, {{{", ".join(operands[szs[2]:-szs[1]])}}}, {{{", ".join(operands[-szs[1]:])}}}, {{{", ".join(operands[:szs[2]])}}};"
+      "{{{", ".join(args[:szs[2]])}}}, {{{", ".join(args[szs[2]:-szs[1]])}}}, {{{", ".join(args[-szs[1]:])}}}, {{{", ".join(args[:szs[2]])}}};"
     : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(szs[2])])}
     : {", ".join([f'"r"(a_pk[{i}])' for i in range(szs[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(szs[1])])});\n  return c;\n}}""")
 
