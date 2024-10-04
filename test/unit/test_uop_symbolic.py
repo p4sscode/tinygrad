@@ -8,9 +8,9 @@ from typing import Tuple
 # *** fake symobilc uops ***
 
 from tinygrad.helpers import DEBUG
-from tinygrad.dtype import dtypes, PtrDType, ConstType, Dict
+from tinygrad.dtype import dtypes, PtrDType, ConstType
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
-from tinygrad.ops import BinaryOps, UOp, UOps, print_uops, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
 from tinygrad.shape.symbolic import Variable
 import functools
 
@@ -21,18 +21,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
   if DEBUG>=5: print_uops(uops)
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
-    cstyle_code_for_op: Dict = {
-      UnaryOps.SQRT: lambda x,_: f"sqrt({x})",
-      UnaryOps.RECIP: lambda x,_: f"(1/{x})",
-      UnaryOps.NEG: lambda x,_: f"-{x}",
-      UnaryOps.EXP2: lambda x,_: f"exp2({x})", UnaryOps.LOG2: lambda x,_: f"log2({x})", UnaryOps.SIN: lambda x,_: f"sin({x})",
-      BinaryOps.SHL: lambda a,b,_: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,_: f"({a}>>{b})",
-      BinaryOps.ADD: lambda a,b,_: f"({a}+{b})", BinaryOps.SUB: lambda a,b,_: f"({a}-{b})", BinaryOps.MAX: lambda a,b,_: f"max({a},{b})",
-      BinaryOps.IDIV: lambda a,b,_: f"({a}/{b})", BinaryOps.MUL: lambda a,b,_: f"({a}*{b})", BinaryOps.MOD: lambda a,b,_: f"({a}%{b})",
-      BinaryOps.CMPLT: lambda a,b,_: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,_: f"({a}!={b})", BinaryOps.XOR: lambda a,b,_: f"({a}^{b})",
-      BinaryOps.AND: lambda a,b,_: f"({a}&{b})", BinaryOps.OR: lambda a,b,_: f"({a}|{b})",
-      TernaryOps.WHERE: lambda a,b,c,_: f"({a}?{b}:{c})"}
-    code_for_op = {**cstyle_code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
+    code_for_op = {**CStyleLanguage.code_for_op, (BinaryOps.IDIV, None): lambda a,b: f"({a}//{b})"}
   rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", uops)
   return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax

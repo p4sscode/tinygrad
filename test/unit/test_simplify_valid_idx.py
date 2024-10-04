@@ -25,18 +25,7 @@ def render(uop:UOp) -> str:
   uops = linearize_uop(full_graph_rewrite(uop.sink()))
   from tinygrad.renderer.cstyle import OpenCLRenderer
   class TestRenderer(OpenCLRenderer):
-    opencl_code_for_op: Dict = {
-      UnaryOps.SQRT: lambda x,_: f"sqrt({x})",
-      UnaryOps.RECIP: lambda x,_: f"(1/{x})",
-      UnaryOps.NEG: lambda x,_: f"-{x}",
-      UnaryOps.EXP2: lambda x,_: f"exp2({x})", UnaryOps.LOG2: lambda x,_: f"log2({x})", UnaryOps.SIN: lambda x,_: f"sin({x})",
-      BinaryOps.SHL: lambda a,b,_: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,_: f"({a}>>{b})",
-      BinaryOps.ADD: lambda a,b,_: f"({a}+{b})", BinaryOps.SUB: lambda a,b,_: f"({a}-{b})", BinaryOps.MAX: lambda a,b,_: f"max({a},{b})",
-      BinaryOps.IDIV: lambda a,b,_: f"({a}/{b})", BinaryOps.MUL: lambda a,b,_: f"({a}*{b})", BinaryOps.MOD: lambda a,b,_: f"({a}%{b})",
-      BinaryOps.CMPLT: lambda a,b,_: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,_: f"({a}!={b})", BinaryOps.XOR: lambda a,b,_: f"({a}^{b})",
-      BinaryOps.AND: lambda a,b,_: f"({a}&{b})", BinaryOps.OR: lambda a,b,_: f"({a}|{b})",
-      TernaryOps.WHERE: lambda a,b,c,_: f"({a}?{b}:{c})"}
-    code_for_op = {**opencl_code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
+    code_for_op = {**OpenCLRenderer.code_for_op, (BinaryOps.IDIV, None): lambda a,b: f"({a}//{b})"}
   fxn = TestRenderer().render("", uops)
   # print(fxn)
   return fxn.split("val0 = ")[1].split(";")[0]
