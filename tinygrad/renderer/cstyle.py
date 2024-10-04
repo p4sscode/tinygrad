@@ -392,16 +392,14 @@ class AMDRenderer(CStyleLanguage):
     (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
-  # upcast to float32 all the ops that don't support bfloat16
-  extra_matcher = PatternMatcher([
-    # NOTE: this is copied from PTX
-    *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
-      for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
-  ]) + extra_pm
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)],
-  ]) + base_rewrite
+  def __init__(self):
+    super().__init__()
+    # upcast to float32 all the ops that don't support bfloat16
+    self.extra_matcher = PatternMatcher([
+      # NOTE: this is copied from PTX
+      *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
+        for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]]) + self.extra_matcher
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -454,10 +452,6 @@ class DSPRenderer(ClangRenderer):
   code_for_op = {**ClangRenderer.code_for_op, (UnaryOps.SIN,None): lambda x:f"__builtin_sin({x})",
     (UnaryOps.LOG2,(dtypes.float64,)): lambda x:f"__builtin_log2l({x})", (UnaryOps.LOG2,None): lambda x,:f"__builtin_log2f({x})",
     (UnaryOps.EXP2,(dtypes.float64,)): lambda x:f"__builtin_exp2l({x})", (UnaryOps.EXP2,None): lambda x,:f"__builtin_exp2f({x})"}
-
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
-    ]) + base_rewrite
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
