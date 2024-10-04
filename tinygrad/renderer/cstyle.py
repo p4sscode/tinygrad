@@ -94,7 +94,7 @@ class CStyleLanguage(Renderer):
     super().__init__()
     self.string_rewrite = PatternMatcher([
       *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
-          r.code_for_op[next((key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1]),(x.arg, None))]
+          r.code_for_op[next((key for key in r.code_for_op.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))]
           (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
         for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]]) + base_rewrite
     self.extra_matcher = extra_pm
