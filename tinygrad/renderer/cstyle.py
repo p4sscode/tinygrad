@@ -95,8 +95,12 @@ class CStyleLanguage(Renderer):
     (BinaryOps.CMPNE,None): lambda a,b:f"({a}!={b})", (BinaryOps.XOR,None): lambda a,b:f"({a}^{b})", (BinaryOps.AND,None): lambda a,b:f"({a}&{b})",
     (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
 
-  string_rewrite = PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in code_for_op.keys()]]) + base_rewrite
-  extra_matcher = extra_pm
+  def __init__(self):
+    super().__init__()
+    self.string_rewrite = PatternMatcher([
+      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]]) \
+      + base_rewrite
+    self.extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -176,14 +180,9 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage().code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
+  code_for_op = {**({(op,dtype):v for (op,dtype),v in CStyleLanguage.code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
     (UnaryOps.SQRT,(dtypes.float64,)): lambda x:f"__builtin_sqrtl({x})", (UnaryOps.SQRT,None): lambda x:f"__builtin_sqrtf({x})",
     (BinaryOps.MAX,None): lambda a,b:f"(({a}>{b})?{a}:{b})",}
-
-  string_rewrite = PatternMatcher([
-    # sorts dtyped keys first
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
-    ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -219,7 +218,9 @@ class OpenCLRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
 
-  string_rewrite = PatternMatcher([
+  def __init__(self):
+    super().__init__()
+    self.string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_{r.render_dtype(x.dtype)}({r[x.src[0]]})"),
     # load/store image (OpenCL)
     (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var"), UPat.var("gate"))),
@@ -227,8 +228,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)))),
       lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
     (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
-      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});"),
-  ]) + CStyleLanguage.string_rewrite
+      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});")]) + self.string_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
@@ -239,10 +239,12 @@ class IntelRenderer(OpenCLRenderer):
   tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,16)],upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
     st1_pattern=(((1,0),),((1,2),(1,1),(0,0))),expanded_shape=(8,2,8)) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
-  string_rewrite = PatternMatcher([
-    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda r,x: f"intel_convert_bfloat16_as_ushort({r[x[0]]})"),
-    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda r,x: f"intel_convert_as_bfloat16_float({r[x[0]]})"),
-  ]) + OpenCLRenderer.string_rewrite
+  def __init__(self):
+    super().__init__()
+    self.string_rewrite = PatternMatcher([
+      (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda r,x: f"intel_convert_bfloat16_as_ushort({r[x[0]]})"),
+      (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda r,x: f"intel_convert_as_bfloat16_float({r[x[0]]})")]) \
+      + self.string_rewrite
 
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
@@ -261,8 +263,6 @@ class MetalRenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
     st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
     dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
-  def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
-
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
@@ -277,19 +277,19 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage().code_for_op, (UnaryOps.SIN,None): lambda x:f"precise::sin({x})"}
+  code_for_op = {**CStyleLanguage.code_for_op, (UnaryOps.SIN,None): lambda x:f"precise::sin({x})"}
 
-  # upcast to float32 all the ops that don't support bfloat16
-  extra_matcher = PatternMatcher([
-    # NOTE: this is copied from PTX
-    *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
-      for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
-  ]) + extra_pm
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)],
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
-  ]) + base_rewrite
+  def __init__(self):
+    super().__init__()
+    self.tensor_cores = self.tensor_cores if os.uname().machine == "arm64" else []
+    self.string_rewrite = PatternMatcher([(UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})")]) \
+      + self.string_rewrite
+    # upcast to float32 all the ops that don't support bfloat16
+    self.extra_matcher = PatternMatcher([
+      # NOTE: this is copied from PTX
+      *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
+        for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]]) + self.extra_matcher
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
@@ -311,7 +311,6 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -321,14 +320,15 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage().code_for_op,
+  code_for_op = {**CStyleLanguage.code_for_op,
     (UnaryOps.RECIP,(dtypes.half,dtypes.bfloat16)): lambda x:f"hrcp({x})", (BinaryOps.MAX,(dtypes.half,dtypes.bfloat16)):lambda x: f"__hmax({x})",
     (UnaryOps.SQRT,(dtypes.half,dtypes.bfloat16)): lambda x:f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half,dtypes.bfloat16)):lambda x: f"hsin({x})",
     (UnaryOps.LOG2,(dtypes.half,dtypes.bfloat16)): lambda x:f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half,dtypes.bfloat16)):lambda x: f"hexp2({x})"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
-  string_rewrite = PatternMatcher([
-    *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(code_for_op.keys(), key=lambda k: k[1] is None)]
-    ]) + base_rewrite
+
+  def __init__(self, arch:str):
+    super().__init__()
+    self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -382,7 +382,7 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  code_for_op = { **CStyleLanguage().code_for_op,
+  code_for_op = { **CStyleLanguage.code_for_op,
     (UnaryOps.SQRT,(dtypes.half,)): lambda x:f"__ocml_sqrt_f16({x})", (UnaryOps.SQRT,(dtypes.double,)): lambda x:f"__ocml_sqrt_f64({x})",
     (UnaryOps.LOG2,(dtypes.half,)): lambda x:f"__ocml_log2_f16({x})", (UnaryOps.LOG2,(dtypes.double,)): lambda x:f"__ocml_log2_f64({x})",
     (UnaryOps.EXP2,(dtypes.half,)): lambda x:f"__ocml_exp2_f16({x})", (UnaryOps.EXP2,(dtypes.double,)): lambda x:f"__ocml_exp2_f64({x})",
@@ -450,8 +450,8 @@ class DSPRenderer(ClangRenderer):
   supports_float4 = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
-  type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer().code_for_op, (UnaryOps.SIN,None): lambda x:f"__builtin_sin({x})",
+  type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
+  code_for_op = {**ClangRenderer.code_for_op, (UnaryOps.SIN,None): lambda x:f"__builtin_sin({x})",
     (UnaryOps.LOG2,(dtypes.float64,)): lambda x:f"__builtin_log2l({x})", (UnaryOps.LOG2,None): lambda x,:f"__builtin_log2f({x})",
     (UnaryOps.EXP2,(dtypes.float64,)): lambda x:f"__builtin_exp2l({x})", (UnaryOps.EXP2,None): lambda x,:f"__builtin_exp2f({x})"}
 
