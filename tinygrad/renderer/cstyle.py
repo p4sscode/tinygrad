@@ -450,8 +450,8 @@ class DSPRenderer(ClangRenderer):
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {**ClangRenderer.code_for_op, (UnaryOps.SIN,None): lambda x:f"__builtin_sin({x})",
-    (UnaryOps.LOG2,(dtypes.float64,)): lambda x:f"__builtin_log2l({x})", (UnaryOps.LOG2,None): lambda x,:f"__builtin_log2f({x})",
-    (UnaryOps.EXP2,(dtypes.float64,)): lambda x:f"__builtin_exp2l({x})", (UnaryOps.EXP2,None): lambda x,:f"__builtin_exp2f({x})"}
+    (UnaryOps.LOG2,(dtypes.float64,)): lambda x:f"__builtin_log2l({x})", (UnaryOps.LOG2,None): lambda x:f"__builtin_log2f({x})",
+    (UnaryOps.EXP2,(dtypes.float64,)): lambda x:f"__builtin_exp2l({x})", (UnaryOps.EXP2,None): lambda x:f"__builtin_exp2f({x})"}
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
