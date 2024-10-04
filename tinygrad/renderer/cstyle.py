@@ -13,7 +13,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
-def render_alu(r:CStyleLanguage, x:UOp) -> str:
+def _render_alu(r:CStyleLanguage, x:UOp) -> str:
   key = tuple(key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1])
   srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
   return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
@@ -98,7 +98,7 @@ class CStyleLanguage(Renderer):
   def __init__(self):
     super().__init__()
     self.string_rewrite = PatternMatcher([
-      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]]) \
+      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), _render_alu) for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]]) \
       + base_rewrite
     self.extra_matcher = extra_pm
 
