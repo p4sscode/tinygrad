@@ -1,9 +1,9 @@
 import unittest
-from typing import Tuple, Dict
+from typing import Tuple
 
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import UOp, UOps, BinaryOps
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(UOps.LOAD, dtypes.float, (
