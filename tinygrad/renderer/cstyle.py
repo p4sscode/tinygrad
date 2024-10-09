@@ -338,7 +338,7 @@ class CUDARenderer(CStyleLanguage):
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
-    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    mma_dtype_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
@@ -348,7 +348,7 @@ class CUDARenderer(CStyleLanguage):
       # mma operands => {c}, {a}, {b}, {c}
       prefix.append(f"""__device__ {wmma_dtypes[2]} __{name}({wmma_dtypes[0]} a, {wmma_dtypes[1]} b, {wmma_dtypes[2]} c){{
   int *a_pk = (int *)(&a), *b_pk = (int *)(&b), *c_pk = (int *)(&c);
-  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{(dto:=dt_map[dtype_out])}.{(dti:=dt_map[dtype_in])}.{dti}.{dto}"
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{mma_dtype_map[dtype_out]}.{mma_dtype_map[dtype_in]}.{mma_dtype_map[dtype_in]}.{mma_dtype_map[dtype_out]}"
       "{{{", ".join(operands[:n_operands[2]])}}}, {{{", ".join(operands[n_operands[2]:n_operands[2]+n_operands[0]])}}},"
       "{{{", ".join(operands[-n_operands[1]:])}}}, {{{", ".join(operands[:n_operands[2]])}}};"
     : {", ".join([f'"+r"(c_pk[{i}])' for i in range(n_operands[2])])}
