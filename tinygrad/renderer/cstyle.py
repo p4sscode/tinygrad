@@ -15,7 +15,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
-  (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} =  ({r[x.src[1]]}); /*changing kernel*/"),
+  (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
   (UPat(UOps.IF, name="x"), lambda r,x: f"if ({r[x.src[0]]}) {{"),
   (UPat((UOps.ENDIF, UOps.ENDRANGE)), lambda r: "}"),
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
@@ -284,6 +284,7 @@ class MetalRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
+    (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} =  ({r[x.src[1]]}); /*changing kernel*/"),
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
