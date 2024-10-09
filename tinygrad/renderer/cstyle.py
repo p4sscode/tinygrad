@@ -15,7 +15,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
-  (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
+  (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} =  ({r[x.src[1]]}); /*changing kernel*/"),
   (UPat(UOps.IF, name="x"), lambda r,x: f"if ({r[x.src[0]]}) {{"),
   (UPat((UOps.ENDIF, UOps.ENDRANGE)), lambda r: "}"),
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
