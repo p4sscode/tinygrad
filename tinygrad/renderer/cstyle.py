@@ -225,7 +225,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)))),
       lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
     (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
-      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});")
+      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});"),
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -239,7 +239,7 @@ class IntelRenderer(OpenCLRenderer):
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda r,x: f"intel_convert_bfloat16_as_ushort({r[x[0]]})"),
-    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda r,x: f"intel_convert_as_bfloat16_float({r[x[0]]})")
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda r,x: f"intel_convert_as_bfloat16_float({r[x[0]]})"),
   ]) + OpenCLRenderer.string_rewrite
 
   def render_dtype(self, var_dtype:DType) -> str:
@@ -309,6 +309,7 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  def __init__(self, arch:str): self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -323,8 +324,6 @@ class CUDARenderer(CStyleLanguage):
     (UnaryOps.SQRT,(dtypes.half,dtypes.bfloat16)): lambda x:f"hsqrt({x})", (UnaryOps.SIN,(dtypes.half,dtypes.bfloat16)):lambda x: f"hsin({x})",
     (UnaryOps.LOG2,(dtypes.half,dtypes.bfloat16)): lambda x:f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half,dtypes.bfloat16)):lambda x: f"hexp2({x})"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
-
-  def __init__(self, arch:str): self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
