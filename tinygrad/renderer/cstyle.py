@@ -107,12 +107,25 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
-  def get_alu_patterns(self):
+  # def get_alu_patterns(self):
+  #   def find_matching_key(r, x):
+  #     for (op, pattern_dtypes) in r.code_for_op.keys():
+  #       if x.arg == op and pattern_dtypes is not None and x.dtype in pattern_dtypes: return (op, pattern_dtypes)
+  #     return (x.arg, None)
+
+  #   return PatternMatcher([
+  #     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x: r.code_for_op[find_matching_key(r, x)]
+  #         (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+  #       for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
+
+  def get_alu_patterns2(self):
+    def _render_alu(r:CStyleLanguage, x:UOp) -> str:
+      key = tuple(key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1])
+      srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
+      return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
+
     return PatternMatcher([
-      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
-          r.code_for_op[next((key for key in r.code_for_op.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))]
-          (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-        for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
+      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), _render_alu) for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
@@ -309,7 +322,7 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
-  def __init__(self, arch:str): self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
