@@ -91,7 +91,6 @@ class CStyleLanguage(Renderer):
     (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
 
   def __init__(self):
-    super().__init__()
     self.string_rewrite = PatternMatcher([
       *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
           r.code_for_op[next((key for key in r.code_for_op.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))]
