@@ -111,8 +111,9 @@ class CStyleLanguage(Renderer):
     # sorts dtyped keys first
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda k: k[1] is None)
 
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),
-      lambda r,x,fun=alu_rewrite: fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[v] for v in x.src])) # noqa:E501
+    # fun=alu_rewrite is a hack to avoid closure on pattern matcher
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
+      fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
       for (op, dtype), alu_rewrite in sorted_code_for_op]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
