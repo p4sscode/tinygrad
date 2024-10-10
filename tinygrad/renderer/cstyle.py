@@ -398,14 +398,9 @@ class AMDRenderer(CStyleLanguage):
     (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
-  def __init__(self):
-    super().__init__()
-    # upcast to float32 all the ops that don't support bfloat16
-    self.extra_matcher = PatternMatcher([
-      # NOTE: this is copied from PTX
-      *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
-        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
-        for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]]) + self.extra_matcher
+  extra_matcher = PatternMatcher([
+    *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
