@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
-import os, math
+import os, math, functools
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
@@ -107,7 +107,7 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
-  @property
+  @functools.cached_property
   def alu_rewrite(self) -> PatternMatcher:
     def render_alu(r:CStyleLanguage, x:UOp) -> str:
       keys = tuple((key_op, key_dtypes) for (key_op, key_dtypes) in r.code_for_op.keys() if x.arg == key_op and key_dtypes and x.dtype in key_dtypes)
