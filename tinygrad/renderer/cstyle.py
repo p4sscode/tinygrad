@@ -131,7 +131,7 @@ class CStyleLanguage(Renderer):
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    pm = self.get_alu_patterns() +  self.string_rewrite
+    pm = self.get_alu_patterns2() +  self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
