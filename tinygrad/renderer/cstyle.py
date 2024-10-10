@@ -107,21 +107,20 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
-  def alu_rewrite(self) -> PatternMatcher:
-    def render_alu(r:CStyleLanguage, x:UOp) -> str:
-      keys = tuple((key_op, key_dtypes) for (key_op, key_dtypes) in r.code_for_op.keys() if x.arg == key_op and key_dtypes and x.dtype in key_dtypes)
-      srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
-      return r.code_for_op[keys[0] if keys else (x.arg, None)](*srcs)
-
+  def get_alu_patterns(self):
     # sorts dtyped keys first
-    sorted_alu_keys = sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted_alu_keys]])
+    sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda k: k[1] is None)
+    strip_parens_ops = {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}
+
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"),
+      lambda r,x,fun=alu_rewrite: fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in strip_parens_ops else r[v] for v in x.src]))
+      for (op, dtype), alu_rewrite in sorted_code_for_op]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    render_rewrite = self.alu_rewrite() + self.string_rewrite
+    render_rewrite = self.get_alu_patterns() + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
