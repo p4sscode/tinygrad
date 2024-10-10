@@ -107,31 +107,21 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
-  # def get_alu_patterns(self):
-  #   def find_matching_key(r, x):
-  #     for (op, pattern_dtypes) in r.code_for_op.keys():
-  #       if x.arg == op and pattern_dtypes is not None and x.dtype in pattern_dtypes: return (op, pattern_dtypes)
-  #     return (x.arg, None)
-
-  #   return PatternMatcher([
-  #     *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x: r.code_for_op[find_matching_key(r, x)]
-  #         (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-  #       for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
-
-  def get_alu_patterns2(self):
-    def _render_alu(r:CStyleLanguage, x:UOp) -> str:
-      key = tuple(key for key in r.code_for_op.keys() if key[1] is not None and x.arg == key[0] and x.dtype in key[1])
+  def get_alu_patterns(self) -> PatternMatcher:
+    def render_alu(r:CStyleLanguage, x:UOp) -> str:
+      keys = tuple((key_op, key_dtypes) for (key_op, key_dtypes) in r.code_for_op.keys() if x.arg == key_op and key_dtypes and x.dtype in key_dtypes)
       srcs = [strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]
-      return r.code_for_op[key[0] if key else (x.arg,None)](*srcs)
+      return r.code_for_op[keys[0] if keys else (x.arg, None)](*srcs)
 
-    return PatternMatcher([
-      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), _render_alu) for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
+    # sorts dtyped keys first
+    sorted_alu_keys = sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), render_alu) for op, dtype in sorted_alu_keys]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    pm = self.get_alu_patterns2() +  self.string_rewrite
+    main_rewrite = self.get_alu_patterns() + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
@@ -161,7 +151,7 @@ class CStyleLanguage(Renderer):
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
-      l = cast(str, pm.rewrite(u, ctx=self))
+      l = cast(str, main_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
