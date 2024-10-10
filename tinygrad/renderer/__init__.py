@@ -88,5 +88,6 @@ class Renderer:
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
+  code_for_op_dtype: Dict[Tuple[Op,Optional[Tuple[DType, ...]]], Callable] = {}
 
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

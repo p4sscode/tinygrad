@@ -83,6 +83,23 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
+  code_for_op_dtype: Dict = {
+    (UnaryOps.SQRT,None): lambda x:f"sqrt({x})", (UnaryOps.RECIP,None): lambda x:f"(1/{x})", (UnaryOps.NEG,None): lambda x:f"-{x}",
+    (UnaryOps.EXP2,None): lambda x:f"exp2({x})", (UnaryOps.LOG2,None): lambda x:f"log2({x})", (UnaryOps.SIN,None): lambda x:f"sin({x})",
+    (BinaryOps.SHL,None): lambda a,b:f"({a}<<{b})", (BinaryOps.SHR,None): lambda a,b:f"({a}>>{b})", (BinaryOps.ADD,None): lambda a,b:f"({a}+{b})",
+    (BinaryOps.SUB,None): lambda a,b:f"({a}-{b})", (BinaryOps.MAX,None): lambda a,b:f"max({a},{b})", (BinaryOps.IDIV,None): lambda a,b:f"({a}/{b})",
+    (BinaryOps.MUL,None): lambda a,b:f"({a}*{b})", (BinaryOps.MOD,None): lambda a,b:f"({a}%{b})", (BinaryOps.CMPLT,None): lambda a,b:f"({a}<{b})",
+    (BinaryOps.CMPNE,None): lambda a,b:f"({a}!={b})", (BinaryOps.XOR,None): lambda a,b:f"({a}^{b})", (BinaryOps.AND,None): lambda a,b:f"({a}&{b})",
+    (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
+
+  def __init__(self):
+    self.string_rewrite = PatternMatcher([
+      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
+        r.code_for_op_dtype[next((key for key in r.code_for_op_dtype.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))] # noqa: E501
+        (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+        for op, dtype in sorted(self.code_for_op_dtype.keys(), key=lambda k: k[1] is None)]]) + base_rewrite
+    self.extra_matcher = extra_pm
+
   code_for_op: Dict = {
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
@@ -256,8 +273,6 @@ class MetalRenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
     st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
     dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
-  def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
-
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
@@ -272,19 +287,21 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage.code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  code_for_op_dtype = {**CStyleLanguage.code_for_op_dtype, (UnaryOps.SIN,None): lambda x: f"precise::sin({x})"}
 
-  # upcast to float32 all the ops that don't support bfloat16
-  extra_matcher = PatternMatcher([
-    # NOTE: this is copied from PTX
-    *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
-      for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
-  ]) + extra_pm
-
-  string_rewrite = PatternMatcher([
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
-  ]) + base_rewrite
+  def __init__(self):
+    super().__init__()
+    self.tensor_cores = MetalRenderer.tensor_cores if os.uname().machine == "arm64" else []
+    self.string_rewrite = PatternMatcher([
+      (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})"),
+    ]) + self.string_rewrite
+    # upcast to float32 all the ops that don't support bfloat16
+    self.extra_matcher = PatternMatcher([
+      # NOTE: this is copied from PTX
+      *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
+        for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
+    ]) + self.extra_matcher
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
