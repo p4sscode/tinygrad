@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
-import os, math
+import os, math, functools
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
@@ -12,6 +12,16 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
+
+@functools.lru_cache(None)
+def _get_alu_patterns(code_for_op_items):
+  # sorts dtyped keys first
+  sorted_code_for_op = sorted(code_for_op_items, key=lambda k: k[0][1] is None)
+
+  # fun=alu_rewrite is a hack to avoid closure on pattern matcher
+  return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
+    fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+    for (op, dtype), alu_rewrite in sorted_code_for_op]])
 
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
@@ -107,20 +117,11 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
-  def get_alu_patterns(self):
-    # sorts dtyped keys first
-    sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda k: k[1] is None)
-
-    # fun=alu_rewrite is a hack to avoid closure on pattern matcher
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
-      fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-      for (op, dtype), alu_rewrite in sorted_code_for_op]])
-
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    render_rewrite = self.get_alu_patterns() + self.string_rewrite
+    render_rewrite = _get_alu_patterns(tuple(self.code_for_op.items())) + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
