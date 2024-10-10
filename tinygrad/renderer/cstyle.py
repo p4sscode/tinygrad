@@ -90,13 +90,8 @@ class CStyleLanguage(Renderer):
     (BinaryOps.CMPNE,None): lambda a,b:f"({a}!={b})", (BinaryOps.XOR,None): lambda a,b:f"({a}^{b})", (BinaryOps.AND,None): lambda a,b:f"({a}&{b})",
     (BinaryOps.OR,None): lambda a,b:f"({a}|{b})", (TernaryOps.WHERE,None): lambda a,b,c:f"({a}?{b}:{c})"}
 
-  def __init__(self):
-    self.string_rewrite = PatternMatcher([
-      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
-          r.code_for_op[next((key for key in r.code_for_op.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))]
-          (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-        for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]]) + base_rewrite
-    self.extra_matcher = extra_pm
+  string_rewrite = base_rewrite
+  extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -112,10 +107,18 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
+  def get_alu_patterns(self):
+    return PatternMatcher([
+      *[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x:
+          r.code_for_op[next((key for key in r.code_for_op.keys() if x.arg == key[0] and key[1] is not None and x.dtype in key[1]),(x.arg, None))]
+          (*[strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+        for op, dtype in sorted(self.code_for_op.keys(), key=lambda k: k[1] is None)]])
+
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
+    pm = self.get_alu_patterns() +  self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
@@ -145,7 +148,7 @@ class CStyleLanguage(Renderer):
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
-      l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
+      l = cast(str, pm.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
@@ -214,9 +217,7 @@ class OpenCLRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
 
-  def __init__(self):
-    super().__init__()
-    self.string_rewrite = PatternMatcher([
+  string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_{r.render_dtype(x.dtype)}({r[x.src[0]]})"),
     # load/store image (OpenCL)
     (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var"), UPat.var("gate"))),
@@ -224,7 +225,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)))),
       lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
     (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
-      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});")]) + self.string_rewrite
+      lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});")]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
@@ -235,12 +236,10 @@ class IntelRenderer(OpenCLRenderer):
   tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,16)],upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
     st1_pattern=(((1,0),),((1,2),(1,1),(0,0))),expanded_shape=(8,2,8)) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
-  def __init__(self):
-    super().__init__()
-    self.string_rewrite = PatternMatcher([
+  string_rewrite = PatternMatcher([
       (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda r,x: f"intel_convert_bfloat16_as_ushort({r[x[0]]})"),
       (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda r,x: f"intel_convert_as_bfloat16_float({r[x[0]]})")]) \
-      + self.string_rewrite
+      + base_rewrite
 
   def render_dtype(self, var_dtype:DType) -> str:
     return f"ushort{var_dtype.count}" if "bfloat16" in var_dtype.name else super().render_dtype(var_dtype)
@@ -259,6 +258,8 @@ class MetalRenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
     st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
     dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
+  def __init__(self): self.tensor_cores = self.tensor_cores if os.uname().machine == "arm64" else []
+
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
@@ -275,17 +276,13 @@ class MetalRenderer(CStyleLanguage):
   # precise::sin
   code_for_op = {**CStyleLanguage.code_for_op, (UnaryOps.SIN,None): lambda x:f"precise::sin({x})"}
 
-  def __init__(self):
-    super().__init__()
-    self.tensor_cores = self.tensor_cores if os.uname().machine == "arm64" else []
-    self.string_rewrite = PatternMatcher([(UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})")]) \
-      + self.string_rewrite
+  string_rewrite = PatternMatcher([(UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_type<{r.render_dtype(x.dtype)}>({r[x.src[0]]})")]) + base_rewrite
     # upcast to float32 all the ops that don't support bfloat16
-    self.extra_matcher = PatternMatcher([
-      # NOTE: this is copied from PTX
-      *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
-        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
-        for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]]) + self.extra_matcher
+  extra_matcher = PatternMatcher([
+    # NOTE: this is copied from PTX
+    *[(UPat(UOps.ALU, arg=op, dtype=dtypes.bfloat16, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
+      for op in [BinaryOps.MAX, UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]]) + extra_pm
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
@@ -322,9 +319,7 @@ class CUDARenderer(CStyleLanguage):
     (UnaryOps.LOG2,(dtypes.half,dtypes.bfloat16)): lambda x:f"hlog2({x})", (UnaryOps.EXP2,(dtypes.half,dtypes.bfloat16)):lambda x: f"hexp2({x})"}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
-  def __init__(self, arch:str):
-    super().__init__()
-    self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str): self.tensor_cores = self.tensor_cores if int(arch[3:]) >= 80 else []
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
