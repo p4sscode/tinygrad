@@ -13,16 +13,6 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
     return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
-@functools.lru_cache(None)
-def _get_alu_patterns(code_for_op_items: Iterable[Tuple[Tuple[Op,Optional[Tuple[DType, ...]]], Callable]]) -> PatternMatcher:
-  # sorts dtyped keys first
-  sorted_code_for_op = sorted(code_for_op_items, key=lambda item: item[0][1] is None)
-
-  # fun=alu_rewrite is a hack to avoid closure on pattern matcher
-  return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
-    fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-    for (op, dtype), alu_rewrite in sorted_code_for_op]])
-
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -123,15 +113,14 @@ class CStyleLanguage(Renderer):
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
 
     # fun=alu_rewrite is a hack to avoid closure on pattern matcher
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_op_rewrite:
       fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-      for (op, dtype), alu_rewrite in sorted_code_for_op]])
+      for (op, dtype), alu_op_rewrite in sorted_code_for_op]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    # render_rewrite = _get_alu_patterns(tuple(self.code_for_op.items())) + self.string_rewrite
     render_rewrite = self.alu_rewrite + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
