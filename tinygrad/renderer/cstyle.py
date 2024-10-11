@@ -394,7 +394,7 @@ class AMDRenderer(CStyleLanguage):
     (UnaryOps.EXP2,(dtypes.half,)): lambda x:f"__ocml_exp2_f16({x})", (UnaryOps.EXP2,(dtypes.double,)): lambda x:f"__ocml_exp2_f64({x})",
     (UnaryOps.SIN,(dtypes.half,)): lambda x:f"__ocml_sin_f16({x})", (UnaryOps.SIN,(dtypes.double,)): lambda x:f"__ocml_sin_f64({x})",
     (BinaryOps.MAX,(dtypes.half,)): lambda a,b:f"__ocml_fmax_f16({a},{b})", (BinaryOps.MAX,(dtypes.double,)): lambda a,b:f"__ocml_fmax_f64({a},{b})",
-    (UnaryOps.SQRT,None): lambda x:f"__ocml_sqrt_f32({x})", (UnaryOps.LOG2,None): lambda x:f"__ocml_log2_32({x})",
+    (UnaryOps.SQRT,None): lambda x:f"__ocml_sqrt_f32({x})", (UnaryOps.LOG2,None): lambda x:f"__ocml_log2_f32({x})",
     (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
@@ -431,10 +431,6 @@ class AMDRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))),
      lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(c, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16))),
-    # (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y", dtype=dtypes.bfloat16))),
-    #     lambda w,x,y: (UOp(w.op, dtypes.bfloat16, (x.src[1],) + tuple(vv.cast(dtypes.float) for vv in x.src[1:-1]), x.arg).cast(dtypes.bfloat16))),
-    # (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, name="x"),
-        # lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
         lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
   ]) + extra_pm
