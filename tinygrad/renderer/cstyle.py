@@ -395,13 +395,10 @@ class AMDRenderer(CStyleLanguage):
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   extra_matcher = PatternMatcher([
-    *[(UPat(UOps.CAST, dtype=dtype, src=(UPat.var('x', dtype=dtype),)), lambda x: x) for dtype in DTYPES_DICT.values()],
     # this rule changes behaviour as it avoids precision loss without intermediate bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, name='c', src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x'),)),)), lambda c,x: x.cast(c.dtype)),
-
-    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("c"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-     lambda c,x,y: c.alu(TernaryOps.WHERE, x.cast(dtypes.float), y.cast(dtypes.float)).cast(dtypes.bfloat16)),
-
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+     lambda b,x,y: b.alu(TernaryOps.WHERE, x.cast(dtypes.float), y.cast(dtypes.float)).cast(dtypes.bfloat16)),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
   ]) + extra_pm
