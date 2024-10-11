@@ -399,6 +399,7 @@ class AMDRenderer(CStyleLanguage):
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
   extra_matcher = PatternMatcher([
+    (UPat(UOps.CAST, name='c', src=(UPat(UOps.CAST, src=(UPat(name='var'),)),)), lambda c,var: var.cast(c.dtype)),
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))), # noqa:E501
      lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(c,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16))), # noqa:E501
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
