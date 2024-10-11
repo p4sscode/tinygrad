@@ -87,7 +87,6 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  sym_extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
