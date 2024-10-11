@@ -399,10 +399,10 @@ class AMDRenderer(CStyleLanguage):
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
   extra_matcher = PatternMatcher([
-    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))),
-     lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(c, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16))),
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))), # noqa:E501
+     lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(c,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16))), # noqa:E501
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
   ]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
