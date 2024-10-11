@@ -565,5 +565,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+reducer)
       sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
-  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, sym+opts.extra_matcher)
+  if opts is not None and opts.sym_extra_matcher is not None: sink = graph_rewrite(sink, sym+opts.sym_extra_matcher)
+  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
