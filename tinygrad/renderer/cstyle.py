@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast, Iterable
+from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math, functools
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, Op
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -109,7 +109,7 @@ class CStyleLanguage(Renderer):
 
   @functools.cached_property
   def alu_rewrite(self) -> PatternMatcher:
-    # sorts dtyped keys first
+    # sorts dtyped items first
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
 
     # fun=alu_rewrite is a hack to avoid closure on pattern matcher
@@ -400,7 +400,7 @@ class AMDRenderer(CStyleLanguage):
 
   extra_matcher = PatternMatcher([
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]]) + extra_pm
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]])
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
