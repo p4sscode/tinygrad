@@ -4,7 +4,7 @@ import os, math, functools
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, DTYPES_DICT
 from tinygrad.renderer import Renderer, TensorCore
 
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
@@ -399,7 +399,8 @@ class AMDRenderer(CStyleLanguage):
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
   extra_matcher = PatternMatcher([
-    (UPat(UOps.CAST, name='c', src=(UPat(UOps.CAST, name="c2", src=(UPat.var('var'),)),)), lambda c,c2,var: var.cast(c.dtype) if c.dtype==c2.dtype else c), # noqa:E501
+    *[(UPat(UOps.CAST, name='c', dtype=dtype, src=(UPat(UOps.CAST, dtype=dtype, src=(UPat.var('var'),)),)),
+       lambda c,var: var.cast(c.dtype)) for dtype in DTYPES_DICT.values()], # noqa:E501
     # this rule changes behaviour as it may avoid precision loss without intermediate bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, name='c', src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat(name='var'),)),)), lambda c,var: var.cast(c.dtype)), # noqa:E501
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))), # noqa:E501
