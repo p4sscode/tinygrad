@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
+from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast, Iterable
 import os, math, functools
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, Op
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -14,9 +14,9 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
 @functools.lru_cache(None)
-def _get_alu_patterns(code_for_op_items):
+def _get_alu_patterns(code_for_op_items: Iterable[Tuple[Tuple[Op,Optional[Tuple[DType, ...]]], Callable]]) -> PatternMatcher:
   # sorts dtyped keys first
-  sorted_code_for_op = sorted(code_for_op_items, key=lambda k: k[0][1] is None)
+  sorted_code_for_op = sorted(code_for_op_items, key=lambda item: item[0][1] is None)
 
   # fun=alu_rewrite is a hack to avoid closure on pattern matcher
   return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
