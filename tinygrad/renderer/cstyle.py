@@ -401,6 +401,7 @@ class AMDRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([
     *[(UPat(UOps.CAST, name='c', dtype=dtype, src=(UPat(UOps.CAST, dtype=dtype, src=(UPat.var('var'),)),)),
        lambda c,var: var.cast(c.dtype)) for dtype in DTYPES_DICT.values()], # noqa:E501
+    *[(UPat(UOps.CAST, name='c', dtype=dtype, src=(UPat.var('var', dtype=dtype),)), lambda c,var: var) for dtype in DTYPES_DICT.values()],
     # this rule changes behaviour as it may avoid precision loss without intermediate bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, name='c', src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat(name='var'),)),)), lambda c,var: var.cast(c.dtype)), # noqa:E501
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))), # noqa:E501
