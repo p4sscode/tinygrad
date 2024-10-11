@@ -398,9 +398,46 @@ class AMDRenderer(CStyleLanguage):
     (UnaryOps.EXP2,None):lambda x:f"__ocml_exp2_f32({x})", (UnaryOps.SIN,None):lambda x:f"__ocml_sin_f32({x})",
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
+# code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+#                     UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+#                     UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+#                     UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+#                     BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",}
+#
+# def _make_hip_code_for_op():
+#   def wrapper(key, func):
+
+
+#     def cast_bf16(*args):
+#       if args[-1] == dtypes.bfloat16 and alu is TernaryOps.WHERE:
+#         operands = tuple(f"(float)({arg})" for arg in (args[1:-1]))
+#         return f"(hip_bfloat16)({func(*(((args[0],)) + operands), dtypes.float)})"
+#       return func(*args)
+#     return cast_bf16
+
+#     def cast_bf16(*args):
+#       if args[-1] == dtypes.bfloat16:
+#         operands = tuple(f"(float)({arg})" for arg in (args[:-1]))
+#         return f"(hip_bfloat16)({func(*(operands), dtypes.float)})"
+#       return func(*args)
+#     return cast_bf16
+
+
+#   return { k:wrapper(k,v) for k,v in {**CStyleLanguage.code_for_op, **code_for_op_hip}.items() }
+
+# (UPat(UOps.ALU, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y")), arg=TernaryOps.WHERE),
+#    lambda w,x,y: w.dtype == x.dtype == y.dtype),
+
   extra_matcher = PatternMatcher([
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))),
+     lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(c, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16))),
+    # (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y", dtype=dtypes.bfloat16))),
+    #     lambda w,x,y: (UOp(w.op, dtypes.bfloat16, (x.src[1],) + tuple(vv.cast(dtypes.float) for vv in x.src[1:-1]), x.arg).cast(dtypes.bfloat16))),
+    # (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, name="x"),
+        # lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]])
+        lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
+  ]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
