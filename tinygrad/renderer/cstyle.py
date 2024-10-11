@@ -117,11 +117,22 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
 
+  @functools.cached_property
+  def alu_rewrite(self) -> PatternMatcher:
+    # sorts dtyped keys first
+    sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
+
+    # fun=alu_rewrite is a hack to avoid closure on pattern matcher
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_rewrite:
+      fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+      for (op, dtype), alu_rewrite in sorted_code_for_op]])
+
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    render_rewrite = _get_alu_patterns(tuple(self.code_for_op.items())) + self.string_rewrite
+    # render_rewrite = _get_alu_patterns(tuple(self.code_for_op.items())) + self.string_rewrite
+    render_rewrite = self.alu_rewrite + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
