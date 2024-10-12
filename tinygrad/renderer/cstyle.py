@@ -399,8 +399,8 @@ class AMDRenderer(CStyleLanguage):
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))],
-    # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
-    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UPat.const(None, 16)))),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
+      lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UPat.const(None, 16)))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: x),
       ]) + extra_pm
@@ -422,10 +422,10 @@ struct hip_bfloat16 {
     if (~u.u32 & 0x7f800000) { u.u32 += 0x7fff + ((u.u32 >> 16) & 1); } else if (u.u32 & 0xffff) { u.u32 |= 0x10000; }
     data = (u.u32 >> 16);
   }
-  inline __attribute__((device)) operator float() const {
-    unsigned int uval = data << 16;
-    return *reinterpret_cast<float*>(&uval);
-  }
+  // inline __attribute__((device)) operator float() const {
+  //   unsigned int uval = data << 16;
+  //   return *reinterpret_cast<float*>(&uval);
+  // }
 };
 """)
 
