@@ -3,10 +3,10 @@ from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import List, Tuple, cast, Optional
-from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, resolve
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, resolve, sint
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 

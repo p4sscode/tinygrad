@@ -399,16 +399,10 @@ class AMDRenderer(CStyleLanguage):
     (BinaryOps.MAX,None): lambda a,b:f"__ocml_fmax_f32({a},{b})"}
 
   extra_matcher = PatternMatcher([
-    *[(UPat(UOps.CAST, name='c', dtype=dtype, src=(UPat(UOps.CAST, dtype=dtype, src=(UPat.var('var'),)),)),
-       lambda c,var: var.cast(c.dtype)) for dtype in DTYPES_DICT.values()], # noqa:E501
-    *[(UPat(UOps.CAST, name='c', dtype=dtype, src=(UPat.var('var', dtype=dtype),)), lambda c,var: var) for dtype in DTYPES_DICT.values()],
-    # this rule changes behaviour as it may avoid precision loss without intermediate bfloat16 casting
-    (UPat(UOps.CAST, dtype=dtypes.float, name='c', src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat(name='var'),)),)), lambda c,var: var.cast(c.dtype)), # noqa:E501
-    (UPat(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.bfloat16, src=(UPat(name="c"), UPat(name="x", dtype=dtypes.bfloat16), UPat(name="y", dtype=dtypes.bfloat16))), # noqa:E501
-     lambda c,x,y: (UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(c,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16))), # noqa:E501
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]
-  ]) + extra_pm
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
