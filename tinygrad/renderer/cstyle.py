@@ -400,7 +400,7 @@ class AMDRenderer(CStyleLanguage):
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))],
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
-      lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UPat.const(None, 16)))),
+      lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: x),
       ]) + extra_pm
