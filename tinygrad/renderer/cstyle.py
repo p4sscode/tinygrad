@@ -4,7 +4,7 @@ import os, math, functools
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, DTYPES_DICT
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
