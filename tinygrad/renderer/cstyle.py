@@ -393,7 +393,7 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
-  type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  type_map = {dtypes.bfloat16: "unsigned short"}
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
@@ -401,6 +401,8 @@ class AMDRenderer(CStyleLanguage):
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))],
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
       lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
+    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
+      lambda x: UOp(UOps.ALU, arg=BinaryOps.SHR, dtype=dtypes.bfloat16, src=(x, UOp.const(dtypes.int, 16)))),
 
       # UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
       # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
