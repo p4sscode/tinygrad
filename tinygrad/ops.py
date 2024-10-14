@@ -282,11 +282,7 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
-  @staticmethod
-  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
-    # TODO: fix dtype of b.max after Variable is just an UOp
-    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
@@ -299,9 +295,8 @@ class UOp(MathTrait):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(name, min_val, max_val))
-  @staticmethod
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+    return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self):
     assert self.op is UOps.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
@@ -359,13 +354,13 @@ class UOp(MathTrait):
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))
-    if self.op is UOps.ALU and self.dtype.count == 1:
+    if self.op is UOps.ALU:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL:
         # both are non-positive
         if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
-        # at lease one is non-negative
+        # at least one is non-negative
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
@@ -694,9 +689,6 @@ spec = PatternMatcher([
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
 
-  # no pyint allowed here!
-  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
-
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.VIEW, src=()), lambda: True),
   (UPat(UOps.VIEW, src=(UPat(),)), lambda: True),
@@ -985,6 +977,5 @@ renderer = PatternMatcher([
 sint = Union[int, UOp]
 Variable = UOp
 
-def NumNode(val:int): return UOp.const(dtypes.int, val)
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
   return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop
