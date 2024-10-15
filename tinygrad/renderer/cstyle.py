@@ -458,8 +458,9 @@ class AMDRenderer(CStyleLanguage):
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
       lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
-    (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
-      lambda x, y: None if y.dtype == dtypes.float else x.cast(dtypes.float).cast(y.dtype)),
+
+    # (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
+    #   lambda x, y: None if y.dtype == dtypes.float else x.cast(dtypes.float).cast(y.dtype)),
     # bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
 
