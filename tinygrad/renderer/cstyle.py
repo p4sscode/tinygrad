@@ -416,11 +416,11 @@ class AMDRenderer(CStyleLanguage):
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})")]) + base_rewrite
   extra_matcher = PatternMatcher([
-    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+    (UPat(UOps.ALU, dtypes.bfloat16, (UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16)), TernaryOps.WHERE),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+    (UPat(UOps.ALU, dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtype=dtypes.bool, name="x"),
+    (UPat(UOps.ALU, dtypes.bool, name="x"),
       lambda x: UOp(x.op, dtypes.bool, tuple(v.cast(dtypes.float) for v in x.src), x.arg) if any(v.dtype==dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtypes.bfloat16),)),
@@ -440,7 +440,7 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     # TODO: add BF16 vec dts
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; }")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 {\n  unsigned short data;\n}")
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
