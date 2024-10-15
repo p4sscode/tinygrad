@@ -151,7 +151,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.BITCAST}
+      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST}
                                             and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:
@@ -414,7 +414,7 @@ def cast_float_bf16(x: UOp) -> UOp:
 
 def cast_bf16_float(x: UOp) -> UOp:
   x = x.bitcast(dtypes.uint)
-  x = x.alu(BinaryOps.SHR, UOp.const(dtypes.uint, 16))
+  x = x.alu(BinaryOps.SHL, UOp.const(dtypes.uint, 16))
   x = x.bitcast(dtypes.float)
   return x
 
