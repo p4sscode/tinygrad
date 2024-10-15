@@ -379,46 +379,14 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
   # }
 
 def cast_float_bf16(x: UOp) -> UOp:
-  float_val = x
-  u_u32 = float_val.bitcast(dtype=dtypes.uint32)
+  u_u32 = x.bitcast(dtypes.uint32)
 
-  # Extract exponent bits
-  exp_mask = UOp.const(dtypes.uint32, 0x7f800000)
-  exp_bits = u_u32 & exp_mask
-  exp_max = UOp.const(dtypes.uint32, 0x7f800000)
-  is_not_inf_nan = exp_bits != exp_max
+  is_not_inf_nan = -u_u32 & 0x7f800000
+  has_mantissa = u_u32 & 0xffff
 
-  # # Extract mantissa bits
-  mantissa_mask = UOp.const(dtypes.uint32, 0x0000ffff)
-  mantissa_bits = u_u32 & mantissa_mask
-  has_mantissa = mantissa_bits != UOp.const(dtypes.uint32, 0)
+  u_u32 = is_not_inf_nan.where(u_u32 + 0x7fff + ((u_u32 >> 16) & 1), has_mantissa.where((u_u32 | 0x10000), u_u32))
 
-  # # Rounding operations
-  shift16 = u_u32 >> UOp.const(dtypes.uint32, 16)
-  bit16 = shift16 & UOp.const(dtypes.uint32, 1)
-  uop_sum = UOp.const(dtypes.uint32, 0x7fff) + bit16
-  u_u32_plus = u_u32 + uop_sum
-  tmp1 = u_u32_plus >> UOp.const(dtypes.uint32, 16)
-  tmp2 = (u_u32 | UOp.const(dtypes.uint32, 0x10000)) >> UOp.const(dtypes.uint32, 16)
-  tmp3 = u_u32 >> UOp.const(dtypes.uint32, 16)
-
-  # # Combine using where (ternary operation)
-  data = is_not_inf_nan.where(tmp1, has_mantissa.where(tmp2, tmp3))
-
-  return data.bitcast(dtypes.bfloat16)
-
-# // inline __attribute__((device)) operator float() const {
-# //   unsigned int uval = data << 16;
-# //   return *reinterpret_cast<float*>(&uval);
-# // }
-
-def cast_bf16_float(x: UOp) -> UOp:
-  # (x.bitcast(dtypes.uint) << 16).bitcast(dtypes.float)
-
-  x = x.bitcast(dtypes.uint)
-  x = x.alu(BinaryOps.SHL, UOp.const(dtypes.uint, 16))
-  x = x.bitcast(dtypes.float)
-  return x
+  return (u_u32 >> 16).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
@@ -456,31 +424,13 @@ class AMDRenderer(CStyleLanguage):
     (UPat(UOps.ALU, dtype=dtypes.bool, name="x"),
      lambda x: UOp(x.op, src=tuple(v.cast(dtypes.float) for v in x.src), arg=x.arg) if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
-    (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
-      lambda x,y:None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
-
-    # (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
-    #   lambda x, y: None if y.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
+    (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtypes.bfloat16),)),
+      lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
+    (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
+      lambda x, y: None if y.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
     # bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16))), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
-
-    # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
-    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
-    # ),
-
-    # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float32),))),
-    # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float32),)), cast_float_bf16),
-    # (
-    #   UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
-    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.uint, src=(x.bitcast(dtypes.ushort), UOp.const(dtypes.uint, 16))).bitcast(dtypes.float)
-    # ),
-    # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
-    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHR, dtype=dtypes.bfloat16, src=(x, UOp.const(dtypes.int, 16)))),s
-      # UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
-      # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
-    # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
-    #   lambda x: x),
-      ]) + extra_pm
+    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float))), cast_float_bf16)]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -495,15 +445,15 @@ class AMDRenderer(CStyleLanguage):
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
 struct hip_bfloat16 {
   unsigned short data;
-  inline __attribute__((device)) hip_bfloat16(float val) {
-    union { float fp32; unsigned int u32; } u = {val};
-    if (~u.u32 & 0x7f800000) {
-      u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-    } else if (u.u32 & 0xffff) {
-      u.u32 |= 0x10000;
-    }
-    data = (u.u32 >> 16);
-  }
+  // inline __attribute__((device)) hip_bfloat16(float val) {
+  //   union { float fp32; unsigned int u32; } u = {val};
+  //   if (~u.u32 & 0x7f800000) {
+  //     u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
+  //   } else if (u.u32 & 0xffff) {
+   //   u.u32 |= 0x10000;
+    // }
+   // data = (u.u32 >> 16);
+  // }
   // inline __attribute__((device)) operator float() const {
   //   unsigned int uval = data << 16;
   //   return *reinterpret_cast<float*>(&uval);
