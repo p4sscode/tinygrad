@@ -382,7 +382,7 @@ def cast_float_bf16(x: UOp) -> UOp:
   float_val = x
   u_u32 = float_val.bitcast(dtype=dtypes.uint32)
 
-  # # Extract exponent bits
+  # Extract exponent bits
   exp_mask = UOp.const(dtypes.uint32, 0x7f800000)
   exp_bits = u_u32 & exp_mask
   exp_max = UOp.const(dtypes.uint32, 0x7f800000)
@@ -405,7 +405,7 @@ def cast_float_bf16(x: UOp) -> UOp:
   # # Combine using where (ternary operation)
   data = is_not_inf_nan.where(tmp1, has_mantissa.where(tmp2, tmp3))
 
-  return data
+  return data.bitcast(dtypes.bfloat16)
 
   # // inline __attribute__((device)) operator float() const {
   # //   unsigned int uval = data << 16;
