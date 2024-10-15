@@ -450,9 +450,11 @@ class AMDRenderer(CStyleLanguage):
   ]) + base_rewrite
   extra_matcher = extra_pm + PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) if v.dtype == dtypes.bfloat16 else v for v in x.src), x.arg).cast(x.dtype))
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+     lambda x: (UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16))),
+    (UPat(UOps.ALU, dtype=dtypes.bool, name="x"),
+     lambda x: (UOp(x.op, dtypes.bool, tuple(v.cast(dtypes.float) for v in x.src), x.arg))
       if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
