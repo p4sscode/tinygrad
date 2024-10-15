@@ -413,6 +413,8 @@ def cast_float_bf16(x: UOp) -> UOp:
 # // }
 
 def cast_bf16_float(x: UOp) -> UOp:
+  # (x.bitcast(dtypes.uint) << 16).bitcast(dtypes.float)
+
   x = x.bitcast(dtypes.uint)
   x = x.alu(BinaryOps.SHL, UOp.const(dtypes.uint, 16))
   x = x.bitcast(dtypes.float)
@@ -448,6 +450,7 @@ class AMDRenderer(CStyleLanguage):
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))],
+    (UPat(UOps.CAST, dtype=dtypes.float32, src=(UPat.var("x",dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
 
     # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
@@ -459,7 +462,6 @@ class AMDRenderer(CStyleLanguage):
     #   UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.uint, src=(x.bitcast(dtypes.ushort), UOp.const(dtypes.uint, 16))).bitcast(dtypes.float)
     # ),
-    (UPat(UOps.CAST, dtype=dtypes.float32, src=(UPat.var("x", dtype=dtypes.bfloat16),)), cast_bf16_float),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHR, dtype=dtypes.bfloat16, src=(x, UOp.const(dtypes.int, 16)))),s
       # UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
