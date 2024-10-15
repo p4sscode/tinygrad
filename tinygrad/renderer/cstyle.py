@@ -452,7 +452,7 @@ class AMDRenderer(CStyleLanguage):
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) if vv.dtype == dtypes.bfloat16 else vv for vv in x.src), x.arg).cast(dtypes.bfloat16))),
+      lambda x: (UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) if v.dtype == dtypes.bfloat16 else v for v in x.src), x.arg).cast(x.dtype))),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
       lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
