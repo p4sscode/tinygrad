@@ -442,7 +442,7 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
-  type_map = {dtypes.bfloat16: "unsigned short"}
+  type_map = {dtypes.bfloat16: "hip_bfloat16"}
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
@@ -477,18 +477,18 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     # TODO: add BF16 vec dts
-#     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; }")
 # struct hip_bfloat16 {
 #   unsigned short data;
-#   inline __attribute__((device)) hip_bfloat16(float val) {
-#     union { float fp32; unsigned int u32; } u = {val};
-#     if (~u.u32 & 0x7f800000) {
-#       u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-#     } else if (u.u32 & 0xffff) {
-#       u.u32 |= 0x10000;
-#     }
-#     data = (u.u32 >> 16);
-#   }
+#   //inline __attribute__((device)) hip_bfloat16(float val) {
+#    // union { float fp32; unsigned int u32; } u = {val};
+#    // if (~u.u32 & 0x7f800000) {
+#    //   u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
+#    // } else if (u.u32 & 0xffff) {
+#    //   u.u32 |= 0x10000;
+#    // }
+#    // data = (u.u32 >> 16);
+#  // }
 #   // inline __attribute__((device)) operator float() const {
 #   //   unsigned int uval = data << 16;
 #   //   return *reinterpret_cast<float*>(&uval);
