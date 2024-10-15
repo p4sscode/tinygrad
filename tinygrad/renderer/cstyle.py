@@ -448,14 +448,13 @@ class AMDRenderer(CStyleLanguage):
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})"),
   ]) + base_rewrite
-  extra_matcher = extra_pm + PatternMatcher([
+  extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-     lambda x: (UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16))),
+      lambda x: UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bool, name="x"),
-     lambda x: (UOp(x.op, dtypes.bool, tuple(v.cast(dtypes.float) for v in x.src), x.arg))
-      if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
+     lambda x: UOp(x.op, src=tuple(v.cast(dtypes.float) for v in x.src), arg=x.arg) if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
       lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
@@ -480,7 +479,7 @@ class AMDRenderer(CStyleLanguage):
       # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: x),
-      ])
+      ]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
