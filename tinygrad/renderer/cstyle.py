@@ -421,7 +421,7 @@ class AMDRenderer(CStyleLanguage):
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bool, name="x"),
-     lambda x: UOp(x.op, src=tuple(v.cast(dtypes.float) for v in x.src), arg=x.arg) if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
+      lambda x: UOp(x.op, dtypes.bool, tuple(v.cast(dtypes.float) for v in x.src), x.arg) if any(v.dtype==dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtypes.bfloat16),)),
       lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
