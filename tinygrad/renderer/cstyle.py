@@ -454,7 +454,7 @@ class AMDRenderer(CStyleLanguage):
     # ),
 
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float32),))),
-    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float32),)), cast_float_bf16),
+    # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float32),)), cast_float_bf16),
     # (
     #   UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.uint, src=(x.bitcast(dtypes.ushort), UOp.const(dtypes.uint, 16))).bitcast(dtypes.float)
@@ -478,23 +478,24 @@ class AMDRenderer(CStyleLanguage):
 
     # TODO: add BF16 vec dts
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; }")
-# struct hip_bfloat16 {
-#   unsigned short data;
-#   //inline __attribute__((device)) hip_bfloat16(float val) {
-#    // union { float fp32; unsigned int u32; } u = {val};
-#    // if (~u.u32 & 0x7f800000) {
-#    //   u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-#    // } else if (u.u32 & 0xffff) {
-#    //   u.u32 |= 0x10000;
-#    // }
-#    // data = (u.u32 >> 16);
-#  // }
-#   // inline __attribute__((device)) operator float() const {
-#   //   unsigned int uval = data << 16;
-#   //   return *reinterpret_cast<float*>(&uval);
-#   // }
-# };
-# """)
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
+struct hip_bfloat16 {
+  unsigned short data;
+  inline __attribute__((device)) hip_bfloat16(float val) {
+    union { float fp32; unsigned int u32; } u = {val};
+    if (~u.u32 & 0x7f800000) {
+      u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
+    } else if (u.u32 & 0xffff) {
+      u.u32 |= 0x10000;
+    }
+    data = (u.u32 >> 16);
+  }
+  // inline __attribute__((device)) operator float() const {
+  //   unsigned int uval = data << 16;
+  //   return *reinterpret_cast<float*>(&uval);
+  // }
+};
+""")
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
