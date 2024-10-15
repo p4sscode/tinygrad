@@ -457,12 +457,12 @@ class AMDRenderer(CStyleLanguage):
      lambda x: UOp(x.op, src=tuple(v.cast(dtypes.float) for v in x.src), arg=x.arg) if any(v.dtype == dtypes.bfloat16 for v in x.src) else None),
     # add float as middle case for bfloat16
     (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
-      lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
+      lambda x,y:None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
 
     # (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
     #   lambda x, y: None if y.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
     # bfloat16 casting
-    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.ushort)<<16).bitcast(dtypes.float)),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16))), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
 
     # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
