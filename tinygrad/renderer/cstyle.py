@@ -414,8 +414,7 @@ class AMDRenderer(CStyleLanguage):
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   string_rewrite = PatternMatcher([
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})"),
-  ]) + base_rewrite
+    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})")]) + base_rewrite
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.bfloat16)),
@@ -441,25 +440,7 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     # TODO: add BF16 vec dts
-    # if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; }")
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("""
-struct hip_bfloat16 {
-  unsigned short data;
-  // inline __attribute__((device)) hip_bfloat16(float val) {
-  //   union { float fp32; unsigned int u32; } u = {val};
-  //   if (~u.u32 & 0x7f800000) {
-  //     u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-  //   } else if (u.u32 & 0xffff) {
-   //   u.u32 |= 0x10000;
-    // }
-   // data = (u.u32 >> 16);
-  // }
-  // inline __attribute__((device)) operator float() const {
-  //   unsigned int uval = data << 16;
-  //   return *reinterpret_cast<float*>(&uval);
-  // }
-};
-""")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; }")
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
