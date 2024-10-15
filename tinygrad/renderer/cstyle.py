@@ -407,13 +407,13 @@ def cast_float_bf16(x: UOp) -> UOp:
 
   return data.bitcast(dtypes.bfloat16)
 
-  # // inline __attribute__((device)) operator float() const {
-  # //   unsigned int uval = data << 16;
-  # //   return *reinterpret_cast<float*>(&uval);
-  # // }
+# // inline __attribute__((device)) operator float() const {
+# //   unsigned int uval = data << 16;
+# //   return *reinterpret_cast<float*>(&uval);
+# // }
 
 def cast_bf16_float(x: UOp) -> UOp:
-  x = x.bitcast(dtypes.ushort)
+  x = x.bitcast(dtypes.uint)
   x = x.alu(BinaryOps.SHR, UOp.const(dtypes.uint, 16))
   x = x.bitcast(dtypes.float)
   return x
