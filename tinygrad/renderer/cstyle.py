@@ -448,17 +448,17 @@ class AMDRenderer(CStyleLanguage):
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})"),
   ]) + base_rewrite
-  extra_matcher = extra_pm + PatternMatcher([
+  extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
-    # (UPat(UOps.CAST, name="x",  src=(UPat.any(dtype=dtypes.bfloat16),)), lambda x: None if,
-    (
-      UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
-      lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype),
-     ),
-
+    # add float as middle case for bfloat16
+    (UPat(UOps.CAST, name="x", src=(UPat.var("y", dtype=dtypes.bfloat16),)),
+      lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
+    (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
+      lambda x, y: None if y.dtype == dtypes.float else x.cast(dtypes.float).cast(y.dtype)),
+    # bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
 
     # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
@@ -477,7 +477,7 @@ class AMDRenderer(CStyleLanguage):
       # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: x),
-      ])
+      ]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
