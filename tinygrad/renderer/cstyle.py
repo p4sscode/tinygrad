@@ -445,6 +445,9 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>({r[x.src[0]]})"),
+  ]) + base_rewrite
   extra_matcher = extra_pm + PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
