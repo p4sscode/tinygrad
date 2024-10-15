@@ -460,9 +460,9 @@ class AMDRenderer(CStyleLanguage):
       lambda x, y: None if x.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
 
     # (UPat(UOps.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat.var("y"),)),
-    #   lambda x, y: None if y.dtype == dtypes.float else x.cast(dtypes.float).cast(y.dtype)),
+    #   lambda x, y: None if y.dtype == dtypes.float else y.cast(dtypes.float).cast(x.dtype)),
     # bfloat16 casting
-    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.ushort)<<16).bitcast(dtypes.float)),
 
     # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
