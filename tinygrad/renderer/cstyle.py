@@ -445,13 +445,13 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  extra_matcher = PatternMatcher([
+  extra_matcher = extra_pm + PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
 
-    # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x",dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x",dtype=dtypes.bfloat16),)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
 
     # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
     #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
@@ -469,7 +469,7 @@ class AMDRenderer(CStyleLanguage):
       # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
     #   lambda x: x),
-      ]) + extra_pm
+      ])
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -493,10 +493,10 @@ struct hip_bfloat16 {
     }
     data = (u.u32 >> 16);
   }
-   inline __attribute__((device)) operator float() const {
-     unsigned int uval = data << 16;
-     return *reinterpret_cast<float*>(&uval);
-   }
+  // inline __attribute__((device)) operator float() const {
+  //   unsigned int uval = data << 16;
+  //   return *reinterpret_cast<float*>(&uval);
+  // }
 };
 """)
 
