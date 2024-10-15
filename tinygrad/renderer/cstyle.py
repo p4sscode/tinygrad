@@ -398,11 +398,15 @@ class AMDRenderer(CStyleLanguage):
     *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))],
 
+    # (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
+    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))
+    # ),
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat.var("x", dtype=dtypes.bfloat16),)),
-      lambda x: UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x.cast(dtypes.ushort), UOp.const(dtypes.int, 16)))),
-
+      lambda x:
+      UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.uint32, src=(x.bitcast(dtypes.ushort), UOp.const(dtypes.int, 16))).bitcast(dtypes.float)
+      ),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
-    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHR, dtype=dtypes.bfloat16, src=(x, UOp.const(dtypes.int, 16)))),
+    #   lambda x: UOp(UOps.ALU, arg=BinaryOps.SHR, dtype=dtypes.bfloat16, src=(x, UOp.const(dtypes.int, 16)))),s
       # UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16)))),
       # lambda x: UOp.define_var(UOp(UOps.ALU, arg=BinaryOps.SHL, dtype=dtypes.float, src=(x, UOp.const(dtypes.int, 16))))),
     # (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
