@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, symbolic
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -379,9 +379,9 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
   # }
 
 def cast_float_bf16(x: UOp) -> UOp:
-  x = x.bitcast(dtypes.uint32)
+  x = x.bitcast(dtypes.uint)
 
-  is_not_inf_nan = (-x) & 0x7f800000
+  is_not_inf_nan = -x & 0x7f800000
   has_mantissa = x & 0xffff
 
   x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
@@ -413,18 +413,17 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-
-  extra_matcher = PatternMatcher([
+  extra_matcher = symbolic + PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, dtype=dtypes.float, arg=TernaryOps.WHERE, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(b.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), b.arg)),
-    # add float as middle case for bfloat16
-    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),
-      lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype != dtypes.float else None),
-    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")), lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype != dtypes.float else None),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x"))), lambda x:x.cast(dtypes.float)),
+    # add float intermediate casting for bfloat16
+    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
     # bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
     (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16)]) + extra_pm
