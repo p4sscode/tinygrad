@@ -379,14 +379,14 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
   # }
 
 def cast_float_bf16(x: UOp) -> UOp:
-  u_u32 = x.bitcast(dtypes.uint32)
+  u32 = x.bitcast(dtypes.uint32)
 
-  is_not_inf_nan = (-u_u32) & 0x7f800000
-  has_mantissa = u_u32 & 0xffff
+  is_not_inf_nan = (-u32) & 0x7f800000
+  has_mantissa = u32 & 0xffff
 
-  u_u32 = is_not_inf_nan.where(u_u32 + ((u_u32 >> 16) & 1) + 0x7fff, has_mantissa.where((u_u32 | 0x10000), u_u32))
+  u32 = is_not_inf_nan.where(u32 + ((u32 >> 16) & 1) + 0x7fff, has_mantissa.where((u32 | 0x10000), u32))
 
-  return (u_u32 >> 16).bitcast(dtypes.bfloat16)
+  return (u32 >> 16).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
@@ -413,8 +413,8 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  string_rewrite = PatternMatcher([
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})")]) + base_rewrite
+  # string_rewrite = PatternMatcher([
+  #   (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})")]) + base_rewrite
 
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
