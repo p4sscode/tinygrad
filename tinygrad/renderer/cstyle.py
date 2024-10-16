@@ -367,23 +367,11 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
                     UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"}
 
-  # unsigned short data;
-  # inline __attribute__((device)) hip_bfloat16(float val) {
-  #   union { float fp32; unsigned int u32; } u = {val};
-  #   if (~u.u32 & 0x7f800000) {
-  #     u.u32 += 0x7fff + ((u.u32 >> 16) & 1);
-  #   } else if (u.u32 & 0xffff) {
-  #     u.u32 |= 0x10000;
-  #   }
-  #   data = (u.u32 >> 16);
-  # }
-
 def cast_float_bf16(x: UOp) -> UOp:
   x = x.bitcast(dtypes.uint)
 
   is_not_inf_nan = -x & 0x7f800000
   has_mantissa = x & 0xffff
-
   x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
 
   return (x >> 16).bitcast(dtypes.bfloat16)
@@ -421,8 +409,6 @@ class AMDRenderer(CStyleLanguage):
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(b.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), b.arg)),
-    # remove bfloat16 middle cast
-    # (UPat(UOps.CAST, dtype=dtypes.float, src=UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x"))), lambda x: x.cast(dtypes.float)),
     # add float intermediate casting for bfloat16
     (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
