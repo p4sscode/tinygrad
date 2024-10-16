@@ -384,7 +384,7 @@ def cast_float_bf16(x: UOp) -> UOp:
   is_not_inf_nan = -u_u32 & 0x7f800000
   has_mantissa = u_u32 & 0xffff
 
-  u_u32 = is_not_inf_nan.where(u_u32 + 0x7fff + ((u_u32 >> 16) & 1), has_mantissa.where((u_u32 | 0x10000), u_u32))
+  u_u32 = is_not_inf_nan.where(u_u32 + ((u_u32 >> 16) & 1) + 0x7fff, has_mantissa.where((u_u32 or 0x10000), u_u32))
 
   return (u_u32 >> 16).bitcast(dtypes.bfloat16)
 
@@ -418,7 +418,7 @@ class AMDRenderer(CStyleLanguage):
 
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
