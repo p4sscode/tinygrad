@@ -379,14 +379,12 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
   # }
 
 def cast_float_bf16(x: UOp) -> UOp:
-  u32 = x.bitcast(dtypes.float)
+  is_not_inf_nan = (-x) & 0x7f800000
+  has_mantissa = x & 0xffff
 
-  is_not_inf_nan = (-u32) & 0x7f800000
-  has_mantissa = u32 & 0xffff
+  x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
 
-  u32 = is_not_inf_nan.where(u32 + ((u32 >> 16) & 1) + 0x7fff, has_mantissa.where((u32 | 0x10000), u32))
-
-  return (u32 >> 16).bitcast(dtypes.bfloat16)
+  return (x >> 16).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
@@ -426,7 +424,7 @@ class AMDRenderer(CStyleLanguage):
       lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype != dtypes.float else None),
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")), lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype != dtypes.float else None),
     # bfloat16 casting
-    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)), lambda x: (x.bitcast(dtypes.uint)<<16).bitcast(dtypes.float)),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)), lambda x: x.bitcast(dtypes.float)<<16),
     (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16)]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
