@@ -407,8 +407,8 @@ class AMDRenderer(CStyleLanguage):
       lambda b,x,y: UOp(UOps.ALU, dtype=dtypes.float, arg=TernaryOps.WHERE, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-      lambda b,x,y: UOp(b.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), b.arg)),
+    (UPat(UOps.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
     # add float intermediate casting for bfloat16
     (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
