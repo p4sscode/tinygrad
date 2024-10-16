@@ -414,13 +414,15 @@ class AMDRenderer(CStyleLanguage):
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   extra_matcher = symbolic + PatternMatcher([
+    # cast bfloat16 alus to float
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, dtype=dtypes.float, arg=TernaryOps.WHERE, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(b.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), b.arg)),
-    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x"))), lambda x:x.cast(dtypes.float)),
+    # remove bfloat16 middle cast
+    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x"))), lambda x: x.cast(dtypes.float)),
     # add float intermediate casting for bfloat16
     (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
