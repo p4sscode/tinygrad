@@ -395,8 +395,8 @@ class AMDRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtypes.bfloat16, name="x"),
-      lambda x: UOp(x.op, dtypes.float, tuple(v.cast(dtypes.float) for v in x.src), x.arg).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="b", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda b,x,y: UOp(b.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), x.arg))]) + extra_pm
 
