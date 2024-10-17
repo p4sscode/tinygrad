@@ -395,6 +395,9 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})" if x.dtype.itemsize == x.src[0].dtype.itemsize else None)
+    ]) + base_rewrite
   extra_matcher = PatternMatcher([
     # cast bfloat16 alus to float
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
