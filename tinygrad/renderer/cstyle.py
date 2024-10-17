@@ -396,7 +396,8 @@ class AMDRenderer(CStyleLanguage):
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
   string_rewrite = PatternMatcher([
-    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]})" if x.dtype.itemsize == x.src[0].dtype.itemsize else None)
+    (UPat(UOps.BITCAST, name="x"), 
+      lambda r,x: f"(*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]}))" if x.dtype.itemsize == x.src[0].dtype.itemsize else None)
     ]) + base_rewrite
   extra_matcher = PatternMatcher([
     # cast bfloat16 alus to float
