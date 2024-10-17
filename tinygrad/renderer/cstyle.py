@@ -369,7 +369,7 @@ def cast_float_bf16(x: UOp) -> UOp:
   has_mantissa = x & 0xffff
   x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
 
-  return (x >> 16).bitcast(dtypes.bfloat16)
+  return (x >> 16).bitcast(dtypes.float).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
@@ -395,10 +395,6 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  string_rewrite = PatternMatcher([
-    (UPat(UOps.BITCAST, name="x"), 
-      lambda r,x: f"(*reinterpret_cast<{r.render_dtype(x.dtype)}*>(&{r[x.src[0]]}))" if x.dtype.itemsize == x.src[0].dtype.itemsize else None)
-    ]) + base_rewrite
   extra_matcher = PatternMatcher([
     # cast bfloat16 alus to float
     (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
