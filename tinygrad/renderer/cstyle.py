@@ -369,7 +369,7 @@ def cast_float_bf16(x: UOp) -> UOp:
   has_mantissa = x & 0xffff
   x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
 
-  return (x >> 16).bitcast(dtypes.float).bitcast(dtypes.bfloat16)
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
