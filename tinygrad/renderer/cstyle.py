@@ -7,7 +7,7 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
-def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
+def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
@@ -113,8 +113,7 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, ImageDType):
       return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return ("" if mutable else "const ") + (self.smem_prefix if dt.local else self.buffer_prefix) +\
-          self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
+      return (self.smem_prefix if dt.local else self.buffer_prefix) + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
@@ -134,7 +133,9 @@ class CStyleLanguage(Renderer):
         continue
 
       # mark buffers that we store to writable
-      if u.op is UOps.STORE and u.src[0].op is UOps.DEFINE_GLOBAL: bufs[u.src[0]] = (bufs[u.src[0]][0], (bufs[u.src[0]][1][0], True))
+      if u.op is UOps.STORE:
+        for up in u.src[0].sparents:
+          if up.op is UOps.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
