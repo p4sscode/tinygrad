@@ -1,11 +1,88 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
-import os, math
+import os, math, platform, sys
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
+
+# import platform
+# import sys
+# import os
+
+# def is_32bit_arm():
+#     machine = platform.machine().lower()
+#     return 'arm' in machine and '64' not in machine
+
+# def is_64bit_arm():
+#     machine = platform.machine().lower()
+#     return 'aarch64' in machine or ('arm' in machine and '64' in machine)
+
+# def is_riscv():
+#     machine = platform.machine().lower()
+#     return 'riscv' in machine
+
+# def is_x86_with_sse2():
+#     machine = platform.machine().lower()
+#     if 'x86_64' in machine or 'amd64' in machine:
+#         # x86_64 processors support SSE2 by default
+#         return True
+#     elif 'i386' in machine or 'i686' in machine:
+#         # For 32-bit x86, check for SSE2 support
+#         return check_sse2()
+#     else:
+#         return False
+
+# def check_sse2():
+#     # Check SSE2 support on Linux systems
+#     if sys.platform.startswith('linux'):
+#         try:
+#             with open('/proc/cpuinfo') as f:
+#                 if 'sse2' in f.read().lower():
+#                     return True
+#         except FileNotFoundError:
+#             pass
+#     # On Windows, use ctypes to call CPUID (advanced; not shown here)
+#     # For simplicity, assume SSE2 is not available if not confirmed
+#     return False
+
+# if is_32bit_arm():
+#     print("Python is running on 32-bit ARM")
+# elif is_64bit_arm():
+#     print("Python is running on 64-bit ARM (AArch64)")
+# elif is_riscv():
+#     print("Python is running on RISC-V")
+# elif is_x86_with_sse2():
+#     print("Python is running on x86 with SSE2")
+# else:
+#     print("Python is running on an unknown architecture:", platform.machine())
+
+
+def is_dtype_supported(dtype: DType, device: str):
+  if dtype == dtypes.bfloat16:
+    # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+    if device == "CLANG":
+      return any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+    if device == "METAL":
+      # print(__import__('re').findall('Chip: (.*)', __import__('subprocess').getoutput('system_profiler SPHardwareDataType'))[0])
+      return True
+      # return any(all(ti in machine for ti in target) for target in [("aarch64",), ("arm",), ("riscv",), ("x86",)])
+  # if dtype == dtypes.bfloat16:
+  #   # print(os.uname().machine == "arm64")
+  #   # NOTE: this requires bf16 buffer support
+  #   return device in {"AMD", "CUDA", "NV"} or (device in {"CUDA", "NV"})
+  # if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  # # for CI GPU and OSX, cl_khr_fp16 isn't supported
+  # # for CI LLVM, it segfaults because it can't link to the casting function
+  # # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  # if dtype == dtypes.half:
+  #   if device == "GPU": return not CI and not OSX
+  #   if device in ["LLVM", "CUDA", "NV"]: return not CI
+  #   if device == "PYTHON": return sys.version_info >= (3, 12)
+  # if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  return True
 
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
@@ -68,6 +145,31 @@ extra_pm = PatternMatcher([
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(UOps.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
+
+def cast_float_bf16(x: UOp) -> UOp:
+  x = x.bitcast(dtypes.uint)
+
+  is_not_inf_nan = -x & 0x7f800000
+  has_mantissa = x & 0xffff
+  x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
+
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
+
+bf16_pm = PatternMatcher([
+    # cast bfloat16 alus to float
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+    # add float intermediate casting for bfloat16
+    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
+    # bfloat16 casting
+    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
+      lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
+    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16)])
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -180,6 +282,8 @@ class ClangRenderer(CStyleLanguage):
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
+
+  print("bf16 is supported:", is_dtype_supported(dtypes.bfloat16, device))
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -363,15 +467,6 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
                     UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"}
 
-def cast_float_bf16(x: UOp) -> UOp:
-  x = x.bitcast(dtypes.uint)
-
-  is_not_inf_nan = -x & 0x7f800000
-  has_mantissa = x & 0xffff
-  x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
-
-  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -396,21 +491,7 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  extra_matcher = PatternMatcher([
-    # cast bfloat16 alus to float
-    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
-      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
-    (UPat(UOps.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
-      lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
-    # add float intermediate casting for bfloat16
-    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
-    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
-    # bfloat16 casting
-    (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
-      lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
-    (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16)]) + extra_pm
+  extra_matcher = bf16_pm + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
