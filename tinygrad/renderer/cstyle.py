@@ -1,87 +1,20 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
-import os, math, platform, sys
+import os, math, subprocess
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
-# import platform
-# import sys
-# import os
-
-# def is_32bit_arm():
-#     machine = platform.machine().lower()
-#     return 'arm' in machine and '64' not in machine
-
-# def is_64bit_arm():
-#     machine = platform.machine().lower()
-#     return 'aarch64' in machine or ('arm' in machine and '64' in machine)
-
-# def is_riscv():
-#     machine = platform.machine().lower()
-#     return 'riscv' in machine
-
-# def is_x86_with_sse2():
-#     machine = platform.machine().lower()
-#     if 'x86_64' in machine or 'amd64' in machine:
-#         # x86_64 processors support SSE2 by default
-#         return True
-#     elif 'i386' in machine or 'i686' in machine:
-#         # For 32-bit x86, check for SSE2 support
-#         return check_sse2()
-#     else:
-#         return False
-
-# def check_sse2():
-#     # Check SSE2 support on Linux systems
-#     if sys.platform.startswith('linux'):
-#         try:
-#             with open('/proc/cpuinfo') as f:
-#                 if 'sse2' in f.read().lower():
-#                     return True
-#         except FileNotFoundError:
-#             pass
-#     # On Windows, use ctypes to call CPUID (advanced; not shown here)
-#     # For simplicity, assume SSE2 is not available if not confirmed
-#     return False
-
-# if is_32bit_arm():
-#     print("Python is running on 32-bit ARM")
-# elif is_64bit_arm():
-#     print("Python is running on 64-bit ARM (AArch64)")
-# elif is_riscv():
-#     print("Python is running on RISC-V")
-# elif is_x86_with_sse2():
-#     print("Python is running on x86 with SSE2")
-# else:
-#     print("Python is running on an unknown architecture:", platform.machine())
-
-
 def is_dtype_supported(dtype: DType, device: str):
   if dtype == dtypes.bfloat16:
     # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
-    if device == "CLANG":
-      return any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
-    if device == "METAL":
-      # print(__import__('re').findall('Chip: (.*)', __import__('subprocess').getoutput('system_profiler SPHardwareDataType'))[0])
-      return True
-      # return any(all(ti in machine for ti in target) for target in [("aarch64",), ("arm",), ("riscv",), ("x86",)])
-  # if dtype == dtypes.bfloat16:
-  #   # print(os.uname().machine == "arm64")
-  #   # NOTE: this requires bf16 buffer support
-  #   return device in {"AMD", "CUDA", "NV"} or (device in {"CUDA", "NV"})
-  # if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  # # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # # for CI LLVM, it segfaults because it can't link to the casting function
-  # # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  # if dtype == dtypes.half:
-  #   if device == "GPU": return not CI and not OSX
-  #   if device in ["LLVM", "CUDA", "NV"]: return not CI
-  #   if device == "PYTHON": return sys.version_info >= (3, 12)
-  # if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+    if device == "CLANG" or "METAL":
+      check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
+      check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+      return check_clang_version and check_clang_target
+    # if device == "METAL": print(__import__('re').findall('Chip: (.*)', __import__('subprocess').getoutput('system_profiler SPHardwareDataType'))[0])
   return True
 
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
@@ -371,6 +304,8 @@ class MetalRenderer(CStyleLanguage):
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
+
+  print("bf16 is supported:", is_dtype_supported(dtypes.bfloat16, device))
 
   # precise::sin
   code_for_op = {**CStyleLanguage.code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
