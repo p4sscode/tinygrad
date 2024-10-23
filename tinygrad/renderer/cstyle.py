@@ -8,13 +8,11 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
 def is_dtype_supported(dtype: DType, device: str):
-  if dtype == dtypes.bfloat16:
+  if dtype == dtypes.bfloat16 and device in ("CLANG", "METAL"):
     # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
-    if device == "CLANG" or "METAL":
-      check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
-      check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
-      return check_clang_version and check_clang_target
-    # if device == "METAL": print(__import__('re').findall('Chip: (.*)', __import__('subprocess').getoutput('system_profiler SPHardwareDataType'))[0])
+    check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
+    check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+    return check_clang_version and check_clang_target
   return True
 
 def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
@@ -212,11 +210,12 @@ class ClangRenderer(CStyleLanguage):
 
   # language options
   buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.bfloat16:"bf16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
 
-  print("bf16 is supported:", is_dtype_supported(dtypes.bfloat16, device))
+  # print("bf16 is supported:", is_dtype_supported(dtypes.bfloat16, device))
+  extra_matcher = bf16_pm + extra_pm
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -226,7 +225,7 @@ class ClangRenderer(CStyleLanguage):
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, macros = [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
+    prefix, macros = ["struct bf16 { unsigned short data; };"] + [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = [
