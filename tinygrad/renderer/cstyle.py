@@ -140,6 +140,8 @@ class CStyleLanguage(Renderer):
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
+    if not is_dtype_supported(dtypes.bfloat16, self.device) and any(uop.dtype == dtypes.bfloat16 for uop in uops):
+      prefix = (prefix or []) + [f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};"]
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_dtype(self, dt:DType, mutable=True) -> str:
@@ -224,7 +226,6 @@ class ClangRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix, macros = [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
-    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = [
@@ -321,7 +322,6 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
-    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
     for arg in wmma_args: prefix.append(f"""{arg[3].name}2 __{arg[0]}({arg[2].name}2 m, {arg[2].name}2 n, {arg[3].name}2 o) {{
   simdgroup_{arg[3].name}8x8 a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x;
   b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
@@ -424,6 +424,7 @@ class AMDRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  # TODO: add BF16 vec dts
   extra_matcher = bf16_pm + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
@@ -433,9 +434,6 @@ class AMDRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
-
-    # TODO: add BF16 vec dts
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
