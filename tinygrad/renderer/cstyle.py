@@ -210,10 +210,9 @@ class ClangRenderer(CStyleLanguage):
 
   # language options
   buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.bfloat16:"bf16"}
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
-
   if not is_dtype_supported(dtypes.bfloat16, device): extra_matcher = bf16_pm + extra_pm
 
   if AMX:
@@ -225,7 +224,7 @@ class ClangRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix, macros = [self.render_vector_prefix(dt) for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
-    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix += ["typedef struct { unsigned short data; } __bf16;"]
+    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       macros = [
@@ -304,8 +303,6 @@ class MetalRenderer(CStyleLanguage):
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
 
-  # print("bf16 is supported:", is_dtype_supported(dtypes.bfloat16, device))
-
   # precise::sin
   code_for_op = {**CStyleLanguage.code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
 
@@ -316,7 +313,6 @@ class MetalRenderer(CStyleLanguage):
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))
       for op in [UnaryOps.SQRT, UnaryOps.EXP2, UnaryOps.LOG2, UnaryOps.SIN]]
   ]) + extra_pm
-
   if not is_dtype_supported(dtypes.bfloat16, device): extra_matcher = bf16_pm + extra_matcher
 
   string_rewrite = PatternMatcher([
@@ -325,7 +321,7 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is UOps.WMMA])
-    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix += ["typedef unsigned short bf16;"]
+    if not is_dtype_supported(dtypes.bfloat16, self.device): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
     for arg in wmma_args: prefix.append(f"""{arg[3].name}2 __{arg[0]}({arg[2].name}2 m, {arg[2].name}2 n, {arg[3].name}2 o) {{
   simdgroup_{arg[3].name}8x8 a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x;
   b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
@@ -439,7 +435,7 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     # TODO: add BF16 vec dts
-    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; };")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append(f"typedef unsigned short {self.render_dtype(dtypes.bfloat16)};")
 
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
 
