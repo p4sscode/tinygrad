@@ -1,9 +1,9 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Union
+from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
 from tinygrad.helpers import prod, all_int, argsort
 
 @functools.lru_cache(maxsize=None)
@@ -111,7 +111,8 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: this resolve shouldn't be needed
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -125,9 +126,10 @@ class View:
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # simplify as we go
-    if isinstance(offset, UOp): offset = cast(Union[UOp, int], offset.ssimplify())
+    if isinstance(offset, UOp): offset = cast(sint, offset.ssimplify())
+    shape = tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in shape)
+    # TODO: enabling stride simplification breaks it
     """
-    shape = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in shape)
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
     if mask: mask = tuple((s.ssimplify() if isinstance(s, UOp) else s, e.ssimplify() if isinstance(e, UOp) else e) for s,e in mask)
     """
@@ -174,6 +176,7 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
+    if not all_int(vm1.shape): return None
     idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
     merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
@@ -232,9 +235,9 @@ class View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
-      nmask = tuple([(max(0, min(mx-ax,ay-ax)), max(0, min(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
+      nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
-      mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
+      mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
     return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
@@ -292,7 +295,8 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
+    # TODO: this resolve shouldn't be needed
+    assert all(resolve(x >= 0) for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
@@ -322,7 +326,8 @@ class View:
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
-      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
+      # TODO: third resolve shouldn't be needed
+      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
       if resolve(acc != merged_dim): break
