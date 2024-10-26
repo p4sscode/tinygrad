@@ -52,7 +52,7 @@ base_rewrite = PatternMatcher([
   # alu/gep
   *[(UPat(UOps.ALU, arg=op, name="op", src=(UPat.var("a"), UPat.var("b"))),
     lambda r,op,a,b: f"({render_alu_helper(r,a,op)}{cstyle_bin_op_syms[op.arg]}{render_alu_helper(r,b,op)})") for op in cstyle_bin_op_syms.keys()],
-  (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("a"), UPat.var("b"), UPat.var("c"))), lambda r,a,b,c: f"{r[a]}?{r[b]}:{r[c]}"),
+  (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="x"), lambda r,x: f"{r[x.src[0]]}?{r[x.src[1]]}:{r[x.src[2]]}"),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -87,14 +87,9 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_unary_op: Dict = {
-    (UnaryOps.SQRT, None): lambda r, x: f"sqrt({r[x.src[0]]})",
-    (UnaryOps.NEG, None): lambda r, x: f"-{r[x.src[0]]}",
-    (UnaryOps.LOG2, None): lambda r, x: f"log2({r[x.src[0]]})",
-    (UnaryOps.SIN, None): lambda r, x: f"sin({r[x.src[0]]})",
-    (UnaryOps.EXP2, None): lambda r, x: f"exp2({r[x.src[0]]})",
-    (UnaryOps.RECIP, None): lambda r, x: f"(1/{r[x.src[0]]})",
-  }
+  code_for_unary_op: Dict = { (UnaryOps.SQRT, None): lambda r, x: f"sqrt({r[x.src[0]]})", (UnaryOps.NEG, None): lambda r, x: f"-{r[x.src[0]]}",
+                              (UnaryOps.LOG2, None): lambda r, x: f"log2({r[x.src[0]]})", (UnaryOps.SIN, None): lambda r, x: f"sin({r[x.src[0]]})",
+                              (UnaryOps.EXP2, None): lambda r, x: f"exp2({r[x.src[0]]})", (UnaryOps.RECIP, None): lambda r, x: f"(1/{r[x.src[0]]})", }
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
@@ -278,7 +273,7 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage.code_for_op, (UnaryOps.SIN, None): lambda r,x: f"precise::sin({r[x.src[0]]})"}
+  code_for_op = {**CStyleLanguage.code_for_op, (UnaryOps.SIN, None): lambda r, x: f"precise::sin({r[x.src[0]]})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
