@@ -35,7 +35,7 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=math.nan), lambda r: r.nan),
   (UPat.cvar('x', dtype=dtypes.bool), lambda r,x: "1" if x.arg else "0"),
-  (UPat.cvar('x'), lambda r,x: f"{str(x.arg)}{const_suffix_map[x.dtype]}"),
+  (UPat.cvar('x'), lambda r,x: f"{str(x.arg)}{const_suffix_map.get(x.dtype,"")}"),
   # load/store
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
    lambda r,buf,idx,load,var,gate: f"({r[gate]}?*{_render_index(r, buf, idx, load.dtype)}:{r[var]})"),
