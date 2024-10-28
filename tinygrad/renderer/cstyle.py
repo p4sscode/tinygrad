@@ -13,6 +13,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"({r[buf]}+{sidx})"
 
+const_suffix_map = {dtypes.double: "", dtypes.float: "f", dtypes.int64: "ll", dtypes.uint64: "ull", dtypes.uint32: "u"}
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -33,13 +34,9 @@ base_rewrite = PatternMatcher([
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
-  (UPat(UOps.CONST, dtype=dtypes.double, name="x"), lambda r,x: f"{x.arg}" if not math.isnan(x.arg) else r.nan),
-  (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f" if not math.isnan(x.arg) else r.nan),
-  (UPat(UOps.CONST, dtype=dtypes.int64, name="x"), lambda r,x: f"{x.arg}ll"),
-  (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ull"),
-  (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
-  (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
-  (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
+  (UPat(UOps.CONST, arg=math.nan), lambda r: r.nan),
+  (UPat.cvar('x', dtype=dtypes.bool), lambda r,x: "1" if x.arg else "0"),
+  (UPat.cvar('x'), lambda r,x: f"{str(x.arg)}{const_suffix_map[x.dtype]}"),
   # load/store
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
    lambda r,buf,idx,load,var,gate: f"({r[gate]}?*{_render_index(r, buf, idx, load.dtype)}:{r[var]})"),
