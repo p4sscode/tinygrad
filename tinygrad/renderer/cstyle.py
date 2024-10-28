@@ -111,20 +111,19 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   @functools.cached_property
-  def alu_rewrite(self) -> PatternMatcher:
+  def render_rewrite(self) -> PatternMatcher:
     # sorts dtyped items first
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
 
     # render_alu=alu_code_for_op is a hack to avoid closure on pattern matcher
     return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,render_alu=alu_code_for_op:
       render_alu(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-      for (op, dtype), alu_code_for_op in sorted_code_for_op]])
+      for (op, dtype), alu_code_for_op in sorted_code_for_op]]) + self.string_rewrite
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
-    render_rewrite = self.alu_rewrite + self.string_rewrite
 
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
@@ -152,7 +151,7 @@ class CStyleLanguage(Renderer):
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
-      l = cast(str, render_rewrite.rewrite(u, ctx=self))
+      l = cast(str, self.render_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
