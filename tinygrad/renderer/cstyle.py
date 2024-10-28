@@ -318,8 +318,9 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = { **CStyleLanguage.code_for_op, (UnaryOps.RECIP, (dtypes.half, dtypes.bfloat16)): lambda x: f"hrcp({x})",
-    (UnaryOps.SQRT, (dtypes.half,dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.SIN, (dtypes.half,dtypes.bfloat16)): lambda x: f"hsin({x})",
+  code_for_op = {
+    **CStyleLanguage.code_for_op, (UnaryOps.SIN, (dtypes.half, dtypes.bfloat16)): lambda x: f"hsin({x})",
+    (UnaryOps.SQRT, (dtypes.half,dtypes.bfloat16)): lambda x: f"hsqrt({x})", (UnaryOps.RECIP, (dtypes.half,dtypes.bfloat16)): lambda x: f"hrcp({x})",
     (UnaryOps.LOG2, (dtypes.half,dtypes.bfloat16)): lambda x: f"hlog2({x})", (UnaryOps.EXP2, (dtypes.half,dtypes.bfloat16)): lambda x: f"hexp2({x})" }
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
