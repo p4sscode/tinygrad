@@ -83,12 +83,12 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = { (TernaryOps.WHERE,None): lambda a, b, c: f"({a}?{b}:{c})",
-    (UnaryOps.SQRT,None): lambda x: f"sqrt({x})", (BinaryOps.SHL,None): lambda a, b: f"({a}<<{b})", (BinaryOps.MOD,None): lambda a, b: f"({a}%{b})",
-    (UnaryOps.RECIP,None): lambda x: f"(1/{x})", (BinaryOps.SHR,None): lambda a, b: f"({a}>>{b})", (BinaryOps.CMPLT,None): lambda a, b: f"({a}<{b})",
-    (UnaryOps.NEG,None): lambda x: f"-{x}", (BinaryOps.ADD,None): lambda a, b: f"({a}+{b})", (BinaryOps.CMPNE,None): lambda a, b: f"({a}!={b})",
-    (UnaryOps.EXP2,None): lambda x: f"exp2({x})", (BinaryOps.SUB,None): lambda a, b: f"({a}-{b})", (BinaryOps.XOR,None): lambda a, b: f"({a}^{b})",
-    (UnaryOps.LOG2,None): lambda x: f"log2({x})", (BinaryOps.IDIV,None): lambda a, b: f"({a}/{b})", (BinaryOps.AND,None): lambda a, b: f"({a}&{b})",
-    (UnaryOps.SIN,None): lambda x: f"sin({x})",  (BinaryOps.MUL,None): lambda a, b: f"({a}*{b})", (BinaryOps.OR,None): lambda a, b: f"({a}|{b})" }
+    (BinaryOps.AND,None): lambda a, b: f"({a}&{b})", (BinaryOps.SHL,None): lambda a, b: f"({a}<<{b})", (UnaryOps.SQRT,None): lambda x: f"sqrt({x})",
+    (BinaryOps.XOR,None): lambda a, b: f"({a}^{b})", (BinaryOps.SHR,None): lambda a, b: f"({a}>>{b})", (UnaryOps.LOG2,None): lambda x: f"log2({x})",
+    (BinaryOps.SUB,None): lambda a, b: f"({a}-{b})", (BinaryOps.IDIV,None): lambda a, b: f"({a}/{b})", (UnaryOps.EXP2,None): lambda x: f"exp2({x})",
+    (BinaryOps.ADD,None): lambda a, b: f"({a}+{b})", (BinaryOps.CMPLT,None): lambda a, b: f"({a}<{b})", (UnaryOps.RECIP,None): lambda x: f"(1/{x})",
+    (BinaryOps.MOD,None): lambda a, b: f"({a}%{b})", (BinaryOps.CMPNE,None): lambda a, b: f"({a}!={b})", (UnaryOps.SIN,None): lambda x: f"sin({x})",
+    (BinaryOps.MUL,None): lambda a, b: f"({a}*{b})", (BinaryOps.OR,None): lambda a, b: f"({a}|{b})", (UnaryOps.NEG,None): lambda x: f"-{x}", }
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
