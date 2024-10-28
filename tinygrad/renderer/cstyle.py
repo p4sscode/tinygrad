@@ -166,7 +166,6 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
-  float4 = "(float4)"
   has_local = False
   global_max = None
   infinity = "__builtin_inff()"
@@ -177,9 +176,11 @@ class ClangRenderer(CStyleLanguage):
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
+
   string_rewrite = PatternMatcher([
     (UPat(UOps.VECTORIZE, name="x"), lambda r,x: f"({r.render_dtype(x.dtype)}){{{','.join([r[y] for y in x.src])}}}"),
-    (UPat(UOps.GEP, name="x"), lambda r,x: f"{r[x.src[0]]}[{x.arg[0]}]"), ]) + base_rewrite
+    (UPat(UOps.GEP, name="x"), lambda r,x: f"{r[x.src[0]]}[{x.arg[0]}]"),
+  ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -322,8 +323,10 @@ class CUDARenderer(CStyleLanguage):
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage.code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
+
   string_rewrite = PatternMatcher([
-    (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 8 else f".{_nms[x.arg[0]]}"))]) + base_rewrite
+    (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 8 else f".{'xyzwabcd'[x.arg[0]]}"))
+  ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
