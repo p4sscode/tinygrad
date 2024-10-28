@@ -13,6 +13,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"({r[buf]}+{sidx})"
 
+_nms = "xyzwabcdefghijkl"
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -21,9 +22,7 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
   # r method accesses
   (UPat(UOps.RANGE, name="x"), lambda r,x: f"for ({r.render_dtype(x.dtype)} {r[x]} = {r[x.src[0]]}; {r[x]} < {r[x.src[1]]}; {r[x]}++) {{"),
-  (UPat(UOps.VECTORIZE, name="x"),
-   lambda r,x: f"{r.float4.replace('float4', r.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([r[y] for y in x.src])}}}" if r.device == "CLANG" else f"({','.join([r[y] for y in x.src])})")),
+  (UPat(UOps.VECTORIZE, name="x"), lambda r,x: f"{r.float4.replace('float4', r.render_dtype(x.dtype))}({','.join([r[y] for y in x.src])})"),
   (UPat(UOps.CAST, name="x"), lambda r,x: f"({r.render_dtype(x.dtype)})({r[x.src[0]]})"),
   (UPat(UOps.BITCAST, name="x"), lambda r,x: f"(*(({r.buffer_prefix}{r.render_dtype(x.dtype)}*)&{r[x.src[0]]}))"),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
@@ -50,8 +49,7 @@ base_rewrite = PatternMatcher([
   # alu/gep
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
-  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
+  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 4 else f".{_nms[x.arg[0]]}")),
 ])
 
 extra_pm = PatternMatcher([
@@ -180,6 +178,9 @@ class ClangRenderer(CStyleLanguage):
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.VECTORIZE, name="x"), lambda r,x: f"({r.render_dtype(x.dtype)}){{{','.join([r[y] for y in x.src])}}}"),
+    (UPat(UOps.GEP, name="x"), lambda r,x: f"{r[x.src[0]]}[{x.arg[0]}]"), ]) + base_rewrite
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -297,8 +298,6 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
-_nms = "xyzwabcdefghijkl"
-
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
   global_max = (2147483647, 65535, 65535)
@@ -322,6 +321,8 @@ class CUDARenderer(CStyleLanguage):
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = {**CStyleLanguage.code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 8 else f".{_nms[x.arg[0]]}"))]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
