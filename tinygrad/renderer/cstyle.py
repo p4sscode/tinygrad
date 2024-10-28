@@ -32,6 +32,7 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
+  (UPat(UOps.CONST, arg=-math.inf), lambda r: "-" + r.infinity),
   (UPat(UOps.CONST, arg=math.nan), lambda r: r.nan),
   (UPat(UOps.CONST, dtype=dtypes.double, name="x"), lambda r,x: f"{x.arg}"),
   (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f"),
@@ -59,7 +60,6 @@ extra_pm = PatternMatcher([
   (UPat(UOps.CONST, (dtypes.bfloat16, dtypes.half), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
   (UPat(UOps.CONST, (dtypes.uint8, dtypes.uint16), name="c"), lambda c: UOp.const(dtypes.uint32, c.arg).cast(c.dtype)),
   (UPat(UOps.CONST, (dtypes.int8, dtypes.int16), name="c"), lambda c: UOp.const(dtypes.int32, c.arg).cast(c.dtype)),
-  (UPat(UOps.CONST, name="c"), lambda c: -UOp.const(c.dtype, abs(c.arg)) if c.arg < 0 else None),
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(UOps.BITCAST, name="x"),
    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
