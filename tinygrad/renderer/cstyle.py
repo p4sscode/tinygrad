@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
-import os, math
+import os, math, functools
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, syms
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -13,6 +13,8 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"({r[buf]}+{sidx})"
 
+cstyle_bin_op_syms = { **syms, BinaryOps.IDIV: "/" }
+def render_alu_helper(r,x:UOp,op:UOp): return strip_parens(r[x]) if x.arg == op.arg and x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR} else r[x]
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -48,8 +50,9 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"*{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
-  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
-    *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
+  *[(UPat(UOps.ALU, arg=op, name="op", src=(UPat.var("a"), UPat.var("b"))),
+    lambda r,op,a,b: f"({render_alu_helper(r,a,op)}{cstyle_bin_op_syms[op.arg]}{render_alu_helper(r,b,op)})") for op in cstyle_bin_op_syms.keys()],
+  (UPat(UOps.ALU, arg=TernaryOps.WHERE, name="x"), lambda r,x: f"{r[x.src[0]]}?{r[x.src[1]]}:{r[x.src[2]]}"),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
@@ -84,17 +87,9 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = {
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
-    UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
-    BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
-    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
+  code_for_unary_op: Dict = { (UnaryOps.SQRT, None): lambda r, x: f"sqrt({r[x.src[0]]})", (UnaryOps.NEG, None): lambda r, x: f"-{r[x.src[0]]}",
+                              (UnaryOps.LOG2, None): lambda r, x: f"log2({r[x.src[0]]})", (UnaryOps.SIN, None): lambda r, x: f"sin({r[x.src[0]]})",
+                              (UnaryOps.EXP2, None): lambda r, x: f"exp2({r[x.src[0]]})", (UnaryOps.RECIP, None): lambda r, x: f"(1/{r[x.src[0]]})", }
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
@@ -115,6 +110,12 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, PtrDType):
       return (self.smem_prefix if dt.local else self.buffer_prefix) + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
+
+  @functools.cached_property
+  def render_rewrite(self) -> PatternMatcher:
+    # sorts dtyped items first
+    sorted_code_for_op = sorted(self.code_for_unary_op.items(), key=lambda item: item[0][1] is None)
+    return PatternMatcher([(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), code) for (op, dtype), code in sorted_code_for_op]) + self.string_rewrite
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
@@ -147,7 +148,7 @@ class CStyleLanguage(Renderer):
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
-      l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
+      l = cast(str, self.render_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
@@ -178,8 +179,11 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
-                 UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
+  code_for_unary_op = {
+    **({(op, dtype): v for (op, dtype), v in CStyleLanguage.code_for_unary_op.items() if op not in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2)}),
+    (UnaryOps.SQRT, (dtypes.float64,)): lambda r, x: f"__builtin_sqrtl({r[x.src[0]]})",
+    (UnaryOps.SQRT, None): lambda r, x: f"__builtin_sqrtf({r[x.src[0]]})",
+  }
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
@@ -269,7 +273,7 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage.code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  code_for_op = {**CStyleLanguage.code_for_op, (UnaryOps.SIN, None): lambda r, x: f"precise::sin({r[x.src[0]]})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -290,12 +294,6 @@ class MetalRenderer(CStyleLanguage):
   b.thread_elements()[1] = n.y; c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
   return {arg[3].name}2(c.thread_elements()[0], c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
-
-code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})",
-                    UnaryOps.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
 
 _nms = "xyzwabcdefghijkl"
 
@@ -320,7 +318,14 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage.code_for_op, **code_for_op_half}
+  code_for_unary_op = {
+    **CStyleLanguage.code_for_unary_op,
+    (UnaryOps.SIN, (dtypes.half, dtypes.bfloat16)): lambda r, x: f"hsin({r[x.src[0]]})",
+    (UnaryOps.SQRT, (dtypes.half, dtypes.bfloat16)): lambda r, x: f"hsqrt({r[x.src[0]]})",
+    (UnaryOps.LOG2, (dtypes.half, dtypes.bfloat16)): lambda r, x: f"hlog2({r[x.src[0]]})",
+    (UnaryOps.EXP2, (dtypes.half, dtypes.bfloat16)): lambda r, x: f"hexp2({r[x.src[0]]})",
+    (UnaryOps.RECIP, (dtypes.half, dtypes.bfloat16)): lambda r, x: f"hrcp({r[x.src[0]]})",
+  }
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
   def render_vector_prefix(self, dt:DType) -> str:
@@ -358,11 +363,6 @@ class CUDARenderer(CStyleLanguage):
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-                    UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"}
-
 def cast_float_bf16(x: UOp) -> UOp:
   x = x.bitcast(dtypes.uint)
 
@@ -390,7 +390,21 @@ class AMDRenderer(CStyleLanguage):
   kernel_prefix += '\nextern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = { **CStyleLanguage.code_for_op, **code_for_op_hip }
+  code_for_unary_op = {
+    **CStyleLanguage.code_for_op,
+    (UnaryOps.SQRT, (dtypes.half,)): lambda r, x: f"__ocml_sqrt_f16({r[x.src[0]]})",
+    (UnaryOps.SQRT, (dtypes.double,)): lambda r, x: f"__ocml_sqrt_f64({r[x.src[0]]})",
+    (UnaryOps.LOG2, (dtypes.half,)): lambda r, x: f"__ocml_log2_f16({r[x.src[0]]})",
+    (UnaryOps.LOG2, (dtypes.double,)): lambda r, x: f"__ocml_log2_f64({r[x.src[0]]})",
+    (UnaryOps.EXP2, (dtypes.half,)): lambda r, x: f"__ocml_exp2_f16({r[x.src[0]]})",
+    (UnaryOps.EXP2, (dtypes.double,)): lambda r, x: f"__ocml_exp2_f64({r[x.src[0]]})",
+    (UnaryOps.SIN, (dtypes.half,)): lambda r, x: f"__ocml_sin_f16({r[x.src[0]]})",
+    (UnaryOps.SIN, (dtypes.double,)): lambda r, x: f"__ocml_sin_f64({r[x.src[0]]})",
+    (UnaryOps.SQRT, None): lambda r, x: f"__ocml_sqrt_f32({r[x.src[0]]})",
+    (UnaryOps.LOG2, None): lambda r, x: f"__ocml_log2_f32({r[x.src[0]]})",
+    (UnaryOps.EXP2, None): lambda r, x: f"__ocml_exp2_f32({r[x.src[0]]})",
+    (UnaryOps.SIN, None): lambda r, x: f"__ocml_sin_f32({r[x.src[0]]})",
+  }
   smem_prefix = "__attribute__((shared))"
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
@@ -445,9 +459,14 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer.code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
-                 UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
-                 UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+  code_for_op = {
+    **ClangRenderer.code_for_op,
+    (UnaryOps.SIN, None): lambda x: f"__builtin_sin({x})",
+    (UnaryOps.LOG2, (dtypes.float64,)): lambda r, x: f"__builtin_log2l({r[x.src[0]]})",
+    (UnaryOps.LOG2, None): lambda r, x: f"__builtin_log2f({r[x.src[0]]})",
+    (UnaryOps.EXP2, (dtypes.float64,)): lambda r, x: f"__builtin_exp2l({r[x.src[0]]})",
+    (UnaryOps.EXP2, None): lambda r, x: f"__builtin_exp2f({r[x.src[0]]})",
+  }
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
