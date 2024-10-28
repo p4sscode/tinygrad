@@ -13,7 +13,6 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"({r[buf]}+{sidx})"
 
-_nms = "xyzwabcdefghijkl"
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
@@ -49,7 +48,7 @@ base_rewrite = PatternMatcher([
   # alu/gep
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
-  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 4 else f".{_nms[x.arg[0]]}")),
+  (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + (f"[{x.arg[0]}]" if x.src[0].dtype.count > 4 else f".{'xyzwabcd'[x.arg[0]]}")),
 ])
 
 extra_pm = PatternMatcher([
@@ -297,6 +296,8 @@ code_for_op_half = {UnaryOps.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dt
                     UnaryOps.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
                     UnaryOps.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
                     UnaryOps.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",}
+
+_nms = "xyzwabcdefghijkl"
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
