@@ -33,7 +33,7 @@ base_rewrite = PatternMatcher([
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
-  (UPat(UOps.CONST, name="x"), lambda r,x: r.nan if math.isnan(x.arg) else None),
+  (UPat(UOps.CONST, dtype=dtypes.floats, name="x"), lambda r,x: r.nan if math.isnan(x.arg) else None),
   *[(UPat.cvar("x", dtype), lambda r,x,const_dtype_suffix=suffix: f"{x.arg}{const_dtype_suffix}")
     for dtype,suffix in [(dtypes.float,"f"),(dtypes.int64,"ll"),(dtypes.uint64,"ull"),(dtypes.uint32,"u")]],
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
