@@ -110,7 +110,7 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, PtrDType):
       return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + \
         self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
-    prefix = "c" if is_dtype_supported(dtypes.bfloat16, self.device) else ""
+    prefix = "uop_" if not is_dtype_supported(dtypes.bfloat16, self.device) else ""
     return prefix + self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
