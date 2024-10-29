@@ -67,7 +67,7 @@ class PTXRenderer(Renderer):
   kernel_prefix = """.version VERSION
 .target TARGET
 .address_size 64
-.typedef .u16 bf16
+.typedef .u16 bf16;
 .visible .entry
 """
   barrier = "bar.sync\t0;"
