@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Callable, Any
+from typing import Optional, List, Tuple, Dict, Callable, Any, Union
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -83,7 +83,8 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Op, Callable] = {}
+  # different types are necessary while ptx and llvmir are not pm-style
+  code_for_op: Union[Dict[Op, Callable], Dict[Union[Op, Tuple[Op, Optional[Tuple[DType, ...]]]], Callable]] = {}
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
