@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
-import math, struct, ctypes, functools
+import math, struct, ctypes, functools, subprocess, os
 from dataclasses import dataclass
 from tinygrad.helpers import getenv
 
@@ -164,3 +164,13 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
       if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+def is_dtype_supported(dtype: DType, device: str):
+  if dtype == dtypes.bfloat16:
+    if device in ("CLANG", "METAL"):
+      # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+      check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
+      check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+      return check_clang_version and check_clang_target
+    return device not in ("AMD",)
+  return True
