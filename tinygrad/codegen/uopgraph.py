@@ -512,7 +512,8 @@ bf16_pm = PatternMatcher([
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
     # remove bfloat16 intermediate casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float),)),)), lambda x: x),
-    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x'),)),)), lambda x: x.cast(dtypes.float)) ])
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x'),)),)), lambda x: x.cast(dtypes.float)),
+  ])
 
 def cast_float_bf16(x: UOp) -> UOp:
   x = x.bitcast(dtypes.uint)
@@ -524,9 +525,12 @@ def cast_float_bf16(x: UOp) -> UOp:
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 bf16_uop_casting_pm = PatternMatcher([
+  (UPat(UOps.BITCAST, name="x"),
+    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None,),
   (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16),
   (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
-    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float))])
+    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint) << 16).bitcast(dtypes.float),),
+])
 
 # *** uop graph ***
 
@@ -550,6 +554,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+indexing+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   if opts is not None and opts.extra_matcher is not None:
-    sink = graph_rewrite(sink, opts.extra_matcher)
-    if not is_dtype_supported(dtypes.bfloat16,opts.device): sink = graph_rewrite(graph_rewrite(sink, bf16_pm), bf16_uop_casting_pm+opts.extra_matcher)
+    sink = graph_rewrite(sink, opts.extra_matcher+bf16_pm)
+    if not is_dtype_supported(dtypes.bfloat16,opts.device): sink = graph_rewrite(sink, bf16_uop_casting_pm)
   return sink
