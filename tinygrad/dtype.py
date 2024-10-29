@@ -167,11 +167,11 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
 
 def is_dtype_supported(dtype: DType, device: str):
   if dtype == dtypes.bfloat16:
-    if device in ("CLANG", "METAL", "GPU"):
-      # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
-      check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
-      check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
-      return check_clang_version and check_clang_target
+    # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+    clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode())
+    check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+    if device in ("CLANG", "GPU"): return clang_version >= 15 and check_clang_target
+    if device in ("METAL"): return clang_version >= 16 and check_clang_target
     if device in {"CUDA", "NV"}: return not CI
     return device not in ("AMD","HIP")
   return True
