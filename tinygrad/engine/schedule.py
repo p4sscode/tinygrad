@@ -43,12 +43,13 @@ class ScheduleContext:
   realizes: Dict[Buffer, LazyBuffer]
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)
   uop_bufs: Dict[UOp, Buffer] = field(default_factory=dict)
+  ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict)
   var_vals: Dict[Variable, int] = field(default_factory=dict)
 
-def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, outputs, ctx, metadata, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, outputs, ctx, cache).view(buf.st)
     return ret
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   # consts have VALID + value
@@ -64,7 +65,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metada
   if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
   if b in ctx.realizes and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
   # otherwise we fuse it like normal
-  src = tuple(to_uop(x, outputs, ctx, metadata, cache) for x in buf.srcs)
+  src = tuple(to_uop(x, outputs, ctx, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
@@ -72,8 +73,8 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metada
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
-  cache[buf] = ret
-  if buf.metadata is not None: metadata[ubuf] = buf.metadata
+  cache[buf] = ret = UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
+  if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   return ret
 
 # **** AST graph rewrite
@@ -190,13 +191,27 @@ to_si = PatternMatcher([
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
 
+# ** fusion
+
+lazy = PatternMatcher([
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda b,v: v),
+])
+
+multioutput = PatternMatcher([
+  (UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),
+])
+
 def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
+  # fuse and fold store -> loads
+  sink = graph_rewrite(pre, lazy)
+  # fuse multi output
+  if len(sink.src) > 1: sink = graph_rewrite(sink, multioutput, {x.src[0]:x.src[2] for x in sink.src})
   # assert cyclic dependency
-  for b,reads in itertools.groupby((x for x in pre.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
-    if not all_same([x.op for x in reads]):
+  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
+    if not all_same([x.op for x in ops]):
       raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
-  sink = graph_rewrite(graph_rewrite(pre, view_left), view_right)
+  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si, ctx), append_bufs, ctx)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
@@ -205,7 +220,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned), sink))
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned), sink))
   return sink
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
@@ -225,11 +240,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   for stores in store_groups:
     outs = [lazybufs_to_realize[b] for b in stores]
     cache: Dict[LazyBuffer, UOp] = {}
-    metadata: Dict[UOp, Metadata] = {}
-    to_store = tuple(to_uop(out, outs, ctx, metadata, cache) for out in outs)
+    to_store = tuple(to_uop(out, outs, ctx, cache) for out in outs)
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
-    si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None},
-                                 metadata={x:None for x in metadata.values()})
+    metadata = {mx:None for x in sink.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))}
+    si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}, metadata=metadata)
     small_graphs.append((full_ast_rewrite(sink, si_ctx), si_ctx))
 
   # do BFS

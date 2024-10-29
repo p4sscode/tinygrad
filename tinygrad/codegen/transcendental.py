@@ -12,7 +12,7 @@ def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
 def dfadd2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx + yx, xy + yy
 def dfmul2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx * yx, xx * yy + xy * yx
 def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
-  t = dx.recip()
+  t = dx.reciprocal()
   qx = nx * t
   qy = (ny - qx * dy) * t
   return qx, qy
@@ -233,13 +233,13 @@ def xexp2(d:UOp) -> UOp:
                   0.6931471805599452862e+0, 0.1000000000000000000e+1])
   else: u = polyN(s, [0.1535920892e-3, 0.1339262701e-2, 0.9618384764e-2, 0.5550347269e-1, 0.2402264476e+0, 0.6931471825e+0, 1.0])
   u = ldexp2k(u, q) # u*2^q
-  upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[x.dtype]
+  upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[d.dtype]
   # Replace x >= upper with +inf
-  u = x.ge(upper).where(x.const_like(math.inf), u)
+  u = d.ge(upper).where(d.const_like(math.inf), u)
   # Replace x <= lower with zero.
-  u = x.lt(lower).where(x.const_like(0.0), u)
-  # exp2(Inf) = Inf, exp2(-Inf) = 0, exp2(NaN) = NaN
-  return _lazy_map_numbers(d, d.const_like(math.inf), d.const_like(0.0), d.const_like(math.nan), u)
+  u = d.lt(lower).where(d.const_like(0.0), u)
+  # exp2(NaN) = NaN
+  return d.ne(d).where(d.const_like(math.nan), u)
 
 def xlog2(d:UOp) -> UOp:
   """
@@ -257,7 +257,7 @@ def xlog2(d:UOp) -> UOp:
   e = denormal_map.where(e + (-64), e)
 
   if d.dtype == dtypes.float64:
-    x = (m - 1.0) * (m + 1.0).recip()
+    x = (m - 1.0) * (m + 1.0).reciprocal()
     x2 = x * x
     t = polyN(x2, [0.2211941750456081490e+0, 0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
                    0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
@@ -280,7 +280,7 @@ def xlog2(d:UOp) -> UOp:
   # log2_zero = the value of unmasked xlog2(0.0).
   log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
   r = r.ne(log2_zero).where(r, r.const_like(-math.inf))
-  # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
-  r = d_orig.lt(math.inf).where(r, d_orig.ne(math.inf).where(d.const_like(math.nan), d))
-  # log(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d_orig.recip().ne(-math.inf).where(r, r.const_like(-math.inf))
+  # log2(NaN) = NaN
+  r = d_orig.ne(d_orig).where(r.const_like(math.nan), r)
+  # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
+  return d_orig.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
