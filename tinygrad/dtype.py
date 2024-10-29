@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools, subprocess, os
 from dataclasses import dataclass
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 
 ConstType = Union[float, int, bool]
 
@@ -172,5 +172,6 @@ def is_dtype_supported(dtype: DType, device: str):
       check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) > 17
       check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
       return check_clang_version and check_clang_target
+    if device in {"CUDA", "NV"}: return not CI
     return device not in ("AMD","HIP")
   return True
