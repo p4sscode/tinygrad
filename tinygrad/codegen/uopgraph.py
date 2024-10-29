@@ -507,6 +507,9 @@ bf16_pm = PatternMatcher([
       lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
     (UPat(UOps.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
       lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+    # add float intermediate casting for bfloat16
+    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
     # remove bfloat16 intermediate casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float),)),)), lambda x: x),
     (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x'),)),)), lambda x: x.cast(dtypes.float)),
@@ -522,13 +525,9 @@ def cast_float_bf16(x: UOp) -> UOp:
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 bf16_uop_casting_pm = PatternMatcher([
-  # add float intermediate casting for bfloat16
-  (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
-  (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
-  # uop casting
   (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16),
   (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
-    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint) << 16).bitcast(dtypes.float),),
+    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint) << 16).bitcast(dtypes.float)),
 ])
 
 # *** uop graph ***
