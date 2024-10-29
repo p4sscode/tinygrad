@@ -67,8 +67,9 @@ class PTXRenderer(Renderer):
   kernel_prefix = """.version VERSION
 .target TARGET
 .address_size 64
+.typedef .u16 bf16
 .visible .entry
-.typedef .u16 bf16"""
+"""
   barrier = "bar.sync\t0;"
   supports_half = supports_half
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
