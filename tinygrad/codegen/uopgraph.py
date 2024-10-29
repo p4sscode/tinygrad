@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, is_dtype_supported
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher, symbolic_flat
 from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, identity_element, uop_given_valid, parse_valid, is_increasing, simplify_valid
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
@@ -499,6 +499,37 @@ indexing = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
 ])
 
+bf16_pm = PatternMatcher([
+    # cast bfloat16 alus to float
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
+    (UPat(UOps.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+    # add float intermediate casting for bfloat16
+    (UPat(UOps.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
+    # remove bfloat16 intermediate casting
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float),)),)), lambda x: x),
+    (UPat(UOps.CAST, dtype=dtypes.float, src=(UPat(UOps.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x'),)),)), lambda x: x.cast(dtypes.float)),
+  ])
+
+def cast_float_bf16(x: UOp) -> UOp:
+  x = x.bitcast(dtypes.uint)
+
+  is_not_inf_nan = -x & 0x7f800000
+  has_mantissa = x & 0xffff
+  x = is_not_inf_nan.where(x + ((x >> 16) & 1) + 0x7fff, has_mantissa.where((x | 0x10000), x))
+
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
+
+bf16_uop_casting_pm = PatternMatcher([
+  (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_bf16),
+  (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
+    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint) << 16).bitcast(dtypes.float)),
+])
+
 # *** uop graph ***
 
 linearize_cnt = 0
@@ -520,5 +551,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+reducer)
       sink = graph_rewrite(sink, sym+indexing+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
-  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
+  if opts is not None and opts.extra_matcher is not None:
+    sink = graph_rewrite(sink, opts.extra_matcher+bf16_pm)
+    if not is_dtype_supported(dtypes.bfloat16,opts.device): sink = graph_rewrite(sink, opts.extra_matcher+bf16_uop_casting_pm)
   return sink

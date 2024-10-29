@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
-import math, struct, ctypes, functools
+import math, struct, ctypes, functools, subprocess, os
 from dataclasses import dataclass
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 
 ConstType = Union[float, int, bool]
 
@@ -164,3 +164,14 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
       if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+def is_dtype_supported(dtype: DType, device: str):
+  if dtype == dtypes.bfloat16:
+    # https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+    clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode())
+    check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
+    if device in ("CLANG", "GPU"): return clang_version >= 15 and check_clang_target
+    if device in ("METAL"): return clang_version >= 16 and check_clang_target
+    if device in {"CUDA", "NV"}: return not CI
+    return device not in ("AMD","HIP")
+  return True
