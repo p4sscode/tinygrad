@@ -172,5 +172,5 @@ def is_dtype_supported(dtype: DType, device: str):
       check_clang_version = int(subprocess.check_output("clang --version | grep -o '[0-9]\\+' | head -1", shell=True).decode()) >= 14
       check_clang_target = any(target in os.uname().machine.lower() for target in ["aarch64", "arm", "riscv", "x86"])
       return check_clang_version and check_clang_target
-    return device not in ("AMD",)
+    return device not in ("AMD","HIP")
   return True

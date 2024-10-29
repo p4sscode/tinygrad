@@ -551,5 +551,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   if opts is not None and opts.extra_matcher is not None:
     sink = graph_rewrite(sink, opts.extra_matcher)
-    if not is_dtype_supported(dtypes.bfloat16,opts.device): sink = graph_rewrite(graph_rewrite(sink, bf16_pm+opts.extra_matcher), bf16_uop_casting_pm)
+    if not is_dtype_supported(dtypes.bfloat16,opts.device): sink = graph_rewrite(graph_rewrite(sink, bf16_pm), bf16_uop_casting_pm+opts.extra_matcher)
   return sink
