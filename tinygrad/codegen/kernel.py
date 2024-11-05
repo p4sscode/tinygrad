@@ -612,11 +612,11 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp, apply_to_st=None) -> UOp:
       arg = op.arg
-      if op.op in GroupOp.Buffer:
+      if op.op is Ops.VALID: return op.replace(src=(self.sts[self.bufs.index(op)].to_uop(),))
+      if op.op in (Ops.LOAD, Ops.PRELOAD, Ops.STORE):
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
-        if op.op is Ops.VALID: return op.replace(src=(st_uop,))
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
@@ -628,13 +628,13 @@ class Kernel:
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is Ops.MUL
 
-          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+          def fix_st(warp_dims, tcd_dims, tcd_expand, local_pattern, tc_pattern, st1):
             wd, tcd = self.global_dims, self.first_upcast
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
+            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern] + list(range(wd+len(warp_dims), tcd)) + \
+                                         [y + (wd if x == 0 else tcd) for x,y in tc_pattern] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           warp_dims = tuple(sz for _, sz in tc.threads)
@@ -652,14 +652,14 @@ class Kernel:
               st_uop = ShapeTracker.from_shape(ex_shape).to_uop()
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
+                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(Ops.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
             else:
               # for TC=2, we can't do the shapetracker fixup
               srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
             # MUL/SUM instead of WMMA
-            ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, (srcs[0] * srcs[1],), (alu_op, wmma_arg[-1]))
+            ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (alu_op, wmma_arg[-1]))
           else:
             # real WMMA, use CONTRACT/EXPAND to get the vectorization right
             wmma_upcast_axes = wmma_arg[-2]
