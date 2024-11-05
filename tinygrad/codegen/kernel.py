@@ -666,8 +666,8 @@ class Kernel:
             # real WMMA, use CONTRACT/EXPAND to get the vectorization right
             wmma_upcast_axes = wmma_arg[-2]
             wmma_sz = [prod(x[1] for x in l) for l in wmma_upcast_axes]
-            src_0 = rsrc.src[0].view(fix_st1(self.sts[self.bufs.index(rsrc.src[0])])) if fix_st1 else rsrc.src[0]
-            src_1 = rsrc.src[1].view(fix_st2(self.sts[self.bufs.index(rsrc.src[1])])) if fix_st2 else rsrc.src[1]
+            src_0 = rsrc.src[0].view(fix_st1(self.sts[self.bufs.index(rsrc.src[0])])) if fix_st1 else fixup_ast(rsrc.src[0])
+            src_1 = rsrc.src[1].view(fix_st2(self.sts[self.bufs.index(rsrc.src[1])])) if fix_st2 else fixup_ast(rsrc.src[1])
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
               UOp(Ops.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(src_0,), arg=wmma_upcast_axes[0]),
               UOp(Ops.CONTRACT, dtype=rsrc.src[1].dtype.vec(wmma_sz[1]), src=(src_1,), arg=wmma_upcast_axes[1]),
