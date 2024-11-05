@@ -635,7 +635,7 @@ class Kernel:
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern] + list(range(wd+len(warp_dims), tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in tc_pattern] + list(range(tcd+len(tcd_expand), len(new_shape)))
-            return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
+            return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           warp_dims = tuple(sz for _, sz in tc.threads)
           tcd_dims =  tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
@@ -652,7 +652,7 @@ class Kernel:
               st_uop = ShapeTracker.from_shape(expanded_shape).to_uop()
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
+                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(Ops.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
             else:
