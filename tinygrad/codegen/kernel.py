@@ -693,16 +693,15 @@ class Kernel:
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
         arg = (alu_op, axis)
-      elif op.op is Ops.SINK:
-        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
     replace_view = PatternMatcher([(UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st))])
     fix_ast_pm = PatternMatcher([
-      # (UPat(Ops.VALID, name="valid"), lambda ctx, valid: valid.replace(src=(ctx.sts[ctx.bufs.index(valid)].to_uop(),)))
+      (UPat(Ops.SINK, name="sink"), lambda ctx,sink: None if sink.arg else sink.replace(arg=KernelInfo(ctx.local_dims,ctx.upcasted,ctx.dont_use_locals)))
+      # (UPat(Ops.VALID, name="valid"), lambda ctx, valid: valid.replace(src=(sctx.sts[ctx.bufs.index(valid)].to_uop(),)))
       # (UPat(Ops.VALID, name="valid"), lambda ctx, valid: ctx.sts[ctx.bufs.index(valid)].to_uop())
     ])
-    return graph_rewrite(fixup_ast(self.ast), fix_ast_pm+replace_view+view_left, self)
+    return graph_rewrite(graph_rewrite(graph_rewrite(fixup_ast(self.ast), fix_ast_pm, self), replace_view + view_left), replace_view + view_right)
 
   # **** this is the lowerer ****
 
