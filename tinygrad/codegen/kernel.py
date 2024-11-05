@@ -628,13 +628,13 @@ class Kernel:
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is Ops.MUL
 
-          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+          def fix_st(warp_dims, tcd_dims, tcd_expand, local_pattern, tc_pattern, st1):
             wd, tcd = self.global_dims, self.first_upcast
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
+            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern] + list(range(wd+len(warp_dims), tcd)) + \
+                                         [y + (wd if x == 0 else tcd) for x,y in tc_pattern] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           warp_dims = tuple(sz for _, sz in tc.threads)
@@ -648,11 +648,15 @@ class Kernel:
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
-              ex_shape = tuple(1 if i < self.global_dims or (i >= self.first_reduce and i < self.first_upcast) else s \
+              expanded_shape = tuple(1 if i < self.global_dims or (i >= self.first_reduce and i < self.first_upcast) else s \
                               for i,s in enumerate(self.full_shape))
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                st_uop = ShapeTracker.from_shape(ex_shape).to_uop()
+                st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is Ops.LOAD]
+                local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(expanded_shape))
+                st_uop = ShapeTracker.from_shape(local_shape).expand(expanded_shape).to_uop()
+                st_exp_uop = ShapeTracker.from_shape(expanded_shape).to_uop()
+                assert st_uop == st_exp_uop, "not equal"
                 membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(Ops.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
