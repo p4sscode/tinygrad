@@ -617,7 +617,6 @@ class Kernel:
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
         if op.op is Ops.VALID: return op.replace(src=(st_uop,))
-        if op.op is Ops.STORE: return op.replace(src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
@@ -649,13 +648,10 @@ class Kernel:
           if self.use_tensor_cores >= 2:
             if self.use_tensor_cores == 3:
               # TC=3, emulate the warp addressing with locals
-              ex_shape = tuple(1 if i < self.global_dims or (i >= self.first_reduce and i < self.first_upcast) else s \
-                              for i,s in enumerate(self.full_shape))
+              ex_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
+              st_uop = ShapeTracker.from_shape(ex_shape).to_uop()
               srcs = []
               for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is Ops.LOAD]
-                local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
-                st_uop = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uop()
                 membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(Ops.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
