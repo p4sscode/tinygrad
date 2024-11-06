@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callab
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, BinaryOps, KernelInfo, UOp, Ops, PatternMatcher, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-    graph_rewrite, track_rewrites
+    graph_rewrite, track_rewrites, UPat
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType
@@ -641,30 +641,39 @@ class Kernel:
             tcd_dims = tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
 
-            fix_st1 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st1_pattern) if tc.st1_pattern else None
-            fix_st2 = functools.partial(fix_st, warp_dims, tcd_dims, tc.expanded_shape, *tc.st2_pattern) if tc.st2_pattern else None
+            srcs = list(rsrc.src)
+            for i, (src, pat) in enumerate(zip(srcs, [tc.st1_pattern, tc.st2_pattern])):
+              st = self.sts[self.bufs.index(src)]
+              if pat: st = fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, st)
+              srcs[i] = src.view(st)
 
-            assert apply_to_st is None, "double tensor core? not supported"
+            if self.use_tensor_cores == 3:
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
+              local_st = ShapeTracker.from_shape(local_shape)
+              local_sts = []
+              for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
+                if pat: local_sts.append(fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, local_st).to_uop())
+                else: local_sts[i] = local_st.to_uop()
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(warp_dims), upcast_axes, reduce_axes)
               wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
               wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-                UOp(Ops.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(fixup_ast(rsrc.src[0], fix_st1),), arg=upcast_axes[0]),
-                UOp(Ops.CONTRACT, dtype=rsrc.src[1].dtype.vec(wmma_sz[1]), src=(fixup_ast(rsrc.src[1], fix_st2),), arg=upcast_axes[1]),
+                UOp(Ops.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
+                UOp(Ops.CONTRACT, dtype=rsrc.src[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
                 UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
 
               ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
-            elif self.use_tensor_cores == 3: # TC=3, emulate the warp addressing with locals, MUL/SUM instead of WMMA
-              expanded_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
-              st_uop = ShapeTracker.from_shape(expanded_shape).to_uop()
-              srcs = []
-              for i,(src,fix_st_fxn) in enumerate(zip(rsrc.src, [fix_st1, fix_st2])):
-                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
-                local_store = fixup_ast(UOp(Ops.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
-                srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
-              ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (alu_op, reduce_axes))
+            else: # TC=3, emulate the warp addressing with locals, MUL/SUM instead of WMMA
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
+              local_st = ShapeTracker.from_shape(local_shape)
+              load_srcs = []
+              for i in range(2):
+                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", local_sts[i].arg.real_size()))
+                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, local_sts[i], srcs[i]))
+                load_srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, local_st.to_uop(), local_store)))
+              ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((load_srcs[0] * load_srcs[1]).cast(tc.dtype_out),), (alu_op, reduce_axes))
 
           else: # for TC=2, we can't do the shapetracker fixup, MUL/SUM instead of WMMA
             ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((fixup_ast(rsrc.src[0]) * fixup_ast(rsrc.src[1])),), (alu_op, reduce_axes))
@@ -693,7 +702,11 @@ class Kernel:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
+      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
+      (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
+       lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+    ]))
 
   # **** this is the lowerer ****
 
