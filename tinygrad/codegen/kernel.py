@@ -647,14 +647,6 @@ class Kernel:
               if pat: st = fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, st)
               srcs[i] = src.view(st)
 
-            if self.use_tensor_cores == 3:
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
-              local_st = ShapeTracker.from_shape(local_shape)
-              local_sts = []
-              for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
-                if pat: local_sts.append(fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, local_st).to_uop())
-                else: local_sts[i] = local_st.to_uop()
-
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(warp_dims), upcast_axes, reduce_axes)
               wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
@@ -666,13 +658,15 @@ class Kernel:
               ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
             else: # TC=3, emulate the warp addressing with locals, MUL/SUM instead of WMMA
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
-              local_st = ShapeTracker.from_shape(local_shape)
+              st = ShapeTracker.from_shape(tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape)))
               load_srcs = []
-              for i in range(2):
-                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", local_sts[i].arg.real_size()))
-                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, local_sts[i], srcs[i]))
-                load_srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, local_st.to_uop(), local_store)))
+              for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
+                if pat: local_st = fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, st).to_uop()
+                else: local_st = st.to_uop()
+
+                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st.real_size()))
+                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, local_st, srcs[i]))
+                load_srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st.to_uop(), local_store)))
               ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((load_srcs[0] * load_srcs[1]).cast(tc.dtype_out),), (alu_op, reduce_axes))
 
           else: # for TC=2, we can't do the shapetracker fixup, MUL/SUM instead of WMMA
