@@ -628,27 +628,26 @@ class Kernel:
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
           if self.use_tensor_cores == 1 or self.use_tensor_cores == 3:
-            def fix_st(warp_dims, tcd_dims, tcd_expand, local_pattern, tc_pattern, st1):
+            def fix_st(tc, local_pattern, tc_pattern, st1):
+              warp_dims, tcd_dims = tuple(sz for _, sz in tc.threads), tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
               wd, tcd = self.global_dims, self.first_upcast
               assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
               assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-              new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-              permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern] + list(range(wd+len(warp_dims), tcd)) + \
-                                           [y + (wd if x == 0 else tcd) for x,y in tc_pattern] + list(range(tcd+len(tcd_expand), len(new_shape)))
+              new_shape = st1.shape[:tcd] + tc.expanded_shape + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
+              permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern]+list(range(wd+len(warp_dims), tcd)) + \
+                                           [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
               return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-            warp_dims = tuple(sz for _, sz in tc.threads)
-            tcd_dims = tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
 
             srcs = list(rsrc.src)
             for i, (src, pat) in enumerate(zip(srcs, [tc.st1_pattern, tc.st2_pattern])):
               st = self.sts[self.bufs.index(src)]
-              if pat: st = fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, st)
+              if pat: st = fix_st(tc, *pat, st)
               srcs[i] = src.view(st)
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
-              wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(warp_dims), upcast_axes, reduce_axes)
+              wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
               wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
               wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
                 UOp(Ops.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
@@ -661,7 +660,7 @@ class Kernel:
               st = ShapeTracker.from_shape(tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape)))
               load_srcs = []
               for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
-                if pat: local_st = fix_st(warp_dims, tcd_dims, tc.expanded_shape, *pat, st).to_uop()
+                if pat: local_st = fix_st(tc, *pat, st).to_uop()
                 else: local_st = st.to_uop()
 
                 membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st.real_size()))
