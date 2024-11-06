@@ -638,14 +638,15 @@ class Kernel:
                                            [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
               return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-            upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
-
+            # bug where there is cast instead of load and self.bufs.index(src) does not exist
             srcs = []
-            for src, pat in zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern]):
+            for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
               st = self.sts[self.bufs.index(src)]
+              assert self.bufs.index(src) == (i+1)
               srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
+              upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
               wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
               wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
