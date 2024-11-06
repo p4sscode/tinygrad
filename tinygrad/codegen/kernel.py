@@ -640,10 +640,10 @@ class Kernel:
 
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
 
-            srcs = list(rsrc.src)
-            for i, (src, pat) in enumerate(zip(srcs, [tc.st1_pattern, tc.st2_pattern])):
+            srcs = []
+            for src, pat in zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern]):
               st = self.sts[self.bufs.index(src)]
-              srcs[i] = src.view(fix_st(tc, *pat, st) if pat else st)
+              srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
