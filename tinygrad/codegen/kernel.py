@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callab
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, BinaryOps, KernelInfo, UOp, Ops, PatternMatcher, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-    graph_rewrite, track_rewrites
+    graph_rewrite, track_rewrites, UPat
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType
@@ -612,7 +612,6 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp, apply_to_st=None) -> UOp:
       arg = op.arg
-      if op.op is Ops.VALID: return op.replace(src=(self.sts[self.bufs.index(op)].to_uop(),))
       if op.op in (Ops.LOAD, Ops.PRELOAD, Ops.STORE):
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
@@ -689,11 +688,13 @@ class Kernel:
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
         arg = (alu_op, axis)
-      elif op.op is Ops.SINK:
-        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
+      (UPat(Ops.VALID, name="op"),
+       lambda ctx,op: op.replace(src=(ctx.sts[ctx.bufs.index(op)].to_uop(),)) if op in ctx.bufs and op.st != ctx.sts[ctx.bufs.index(op)] else None),
+      (UPat(Ops.SINK, name = "op"), lambda ctx,op: None if op.arg else op.replace(arg=KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
+    ]), self)
 
   # **** this is the lowerer ****
 
