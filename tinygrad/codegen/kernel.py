@@ -643,8 +643,7 @@ class Kernel:
             srcs = list(rsrc.src)
             for i, (src, pat) in enumerate(zip(srcs, [tc.st1_pattern, tc.st2_pattern])):
               st = self.sts[self.bufs.index(src)]
-              if pat: st = fix_st(tc, *pat, st)
-              srcs[i] = src.view(st)
+              srcs[i] = src.view(fix_st(tc, *pat, st) if pat else st)
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
@@ -660,11 +659,10 @@ class Kernel:
               st = ShapeTracker.from_shape(tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape)))
               load_srcs = []
               for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
-                if pat: local_st = fix_st(tc, *pat, st).to_uop()
-                else: local_st = st.to_uop()
+                local_st = fix_st(tc, *pat, st) if pat else st
 
                 membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st.real_size()))
-                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, local_st, srcs[i]))
+                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, local_st.to_uop(), srcs[i]))
                 load_srcs.append(UOp(Ops.LOAD, tc.dtype_in, (membuf, st.to_uop(), local_store)))
               ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((load_srcs[0] * load_srcs[1]).cast(tc.dtype_out),), (alu_op, reduce_axes))
 
