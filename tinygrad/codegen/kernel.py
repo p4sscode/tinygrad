@@ -624,7 +624,8 @@ class Kernel:
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
-          rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
+          rsrc = op.src[0]
+          if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
           if self.use_tensor_cores == 1 or self.use_tensor_cores == 3:
@@ -642,8 +643,8 @@ class Kernel:
             srcs = []
             for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
               st = self.sts[self.bufs.index(src)]
-              assert self.bufs.index(src) == (i+1)
-              srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
+              if pat: st = fix_st(tc, *pat, st)
+              srcs.append(src.view(st))
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
