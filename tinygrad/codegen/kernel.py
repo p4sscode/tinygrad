@@ -642,7 +642,7 @@ class Kernel:
             # bug where there is cast instead of load and self.bufs.index(src) does not exist
             srcs = []
             for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
-              st = self.sts[self.bufs.index(src)]
+              st = self.sts[self.bufs_for_tensor_core[op][i]]
               if pat: st = fix_st(tc, *pat, st)
               srcs.append(src.view(st))
 
