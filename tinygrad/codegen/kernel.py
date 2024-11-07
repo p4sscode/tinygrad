@@ -657,10 +657,9 @@ class Kernel:
               wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
               wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
               wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-                UOp(Ops.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
-                UOp(Ops.CONTRACT, dtype=rsrc.src[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
+                UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
+                UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
                 UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-
               ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
             else: # TC=3, emulate the warp addressing with locals, MUL/SUM instead of WMMA
