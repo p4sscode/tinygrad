@@ -619,11 +619,10 @@ class Kernel:
         st_uop = st.to_uop()
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
-        reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        reduce_idx = len(self.bufs) # no double reduce for tc
         alu_op: Ops = op.arg[0]
-        axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
-                    if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
-        if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
+        axis = tuple(i for i in range(self.first_reduce, self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
+        if (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
@@ -639,10 +638,10 @@ class Kernel:
                                            [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
               return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-            # bug where there is cast instead of load and self.bufs.index(src) does not exist
             srcs = []
             for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
-              st = self.sts[self.bufs_for_tensor_core[op][i]]
+              bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
+              st = self.sts[bufs_for_tc[i]]
               if pat: st = fix_st(tc, *pat, st)
               srcs.append(src.view(st))
               if self.use_tensor_cores == 3:
