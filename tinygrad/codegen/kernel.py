@@ -670,15 +670,14 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
-      elif op.op is Ops.SINK:
-        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
+      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda ctx, s0,s1: s0.replace(arg=s1.st)),
       (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
-       lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
-    ]))
+       lambda ctx, e, v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+      (UPat(Ops.SINK, name="op"), lambda ctx, op: None if op.arg else op.replace(arg = KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals)))
+    ]), self)
 
   def get_optimized_ast_group(self) -> UOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
