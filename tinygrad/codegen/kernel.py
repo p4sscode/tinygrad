@@ -606,18 +606,18 @@ class Kernel:
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
 
-  def get_optimized_ast(self) -> UOp:
+  def get_optimized_ast_tc(self) -> UOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
     # transformed to the final UOp
     @functools.lru_cache(None)
-    def fixup_ast(op:UOp, apply_to_st=None) -> UOp:
+    def fixup_ast(op:UOp) -> UOp:
       arg = op.arg
       if op.op is Ops.VALID: return op.replace(src=(self.sts[self.bufs.index(op)].to_uop(),))
       if op.op in (Ops.LOAD, Ops.PRELOAD, Ops.STORE):
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
-        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
+        st_uop = st.to_uop()
+        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         alu_op: Ops = op.arg[0]
@@ -673,8 +673,35 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
+      elif op.op is Ops.SINK:
+        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
+      return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
+    # NOTE: rewrite with an empty PatternMatcher to dedup UOps
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
+      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
+      (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
+       lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+    ]))
+
+  def get_optimized_ast_group(self) -> UOp:
+    # set the shapetrackers to the optimized ones, fixup reduceop
+    # transformed to the final UOp
+    @functools.lru_cache(None)
+    def fixup_ast(op:UOp) -> UOp:
+      arg = op.arg
+      if op.op in GroupOp.Buffer:
+        # for locals, we use the ShapeTracker that's in the srcs
+        st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
+        st_uop = st.to_uop()
+        if op.op is Ops.VALID: return op.replace(src=(st_uop,))
+        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x) for x in op.src[2:]]))
+      if op.op is Ops.REDUCE_AXIS:
+        reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
+        alu_op: Ops = op.arg[0]
+        axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
+                    if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         if self.group_for_reduces:
-          start = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
+          start = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=(alu_op, axis))
           second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
                       if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
           # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
@@ -693,19 +720,16 @@ class Kernel:
         arg = (alu_op, axis)
       elif op.op is Ops.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
-      return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
+      return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
-      (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
-       lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
-    ]))
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
 
   # **** this is the lowerer ****
 
   @track_rewrites()
   def linearize(self) -> Kernel:
-    modified_ast = self.get_optimized_ast()
+    if self.tensor_core: modified_ast = self.get_optimized_ast_tc()
+    else: modified_ast = self.get_optimized_ast_group()
 
     if DEBUG >= 3:
       print(self.name)
