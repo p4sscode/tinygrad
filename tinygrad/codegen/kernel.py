@@ -722,37 +722,13 @@ class Kernel:
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
 
-  def get_optimized_ast(self) -> UOp:
-    # set the shapetrackers to the optimized ones, fixup reduceop
-    # transformed to the final UOp
-    @functools.lru_cache(None)
-    def fixup_ast(op:UOp) -> UOp:
-      arg = op.arg
-      if op.op in GroupOp.Buffer:
-        # for locals, we use the ShapeTracker that's in the srcs
-        st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        st_uop = st.to_uop()
-        if op.op is Ops.VALID: return op.replace(src=(st_uop,))
-        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x) for x in op.src[2:]]))
-      if op.op is Ops.REDUCE_AXIS:
-        reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        alu_op: Ops = op.arg[0]
-        axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
-                    if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
-        arg = (alu_op, axis)
-      elif op.op is Ops.SINK:
-        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
-      return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
-    # NOTE: rewrite with an empty PatternMatcher to dedup UOps
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
   # **** this is the lowerer ****
 
   @track_rewrites()
   def linearize(self) -> Kernel:
 
     if self.tensor_core: modified_ast = self.get_optimized_ast_tc()
-    elif self.group_for_reduces: modified_ast = self.get_optimized_ast_group()
-    else: modified_ast = self.get_optimized_ast()
+    else: modified_ast = self.get_optimized_ast_group()
 
     if DEBUG >= 3:
       print(self.name)
