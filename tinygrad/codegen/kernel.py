@@ -609,12 +609,9 @@ class Kernel:
   def get_optimized_ast_tc(self) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
-      if op.op is Ops.VALID: return op.replace(src=(self.sts[self.bufs.index(op)].to_uop(),))
-      if op.op in (Ops.LOAD, Ops.PRELOAD, Ops.STORE):
-        # for locals, we use the ShapeTracker that's in the srcs
+      if op.op in GroupOp.Buffer:
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        st_uop = st.to_uop()
-        return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x) for x in op.src[2:]]))
+        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(st)
       if op.op is Ops.REDUCE_AXIS and (tc := self.tensor_core):
         reduce_idx = len(self.bufs) # no double reduce for tc
         axis = tuple(i for i in range(self.first_reduce, self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
@@ -663,13 +660,11 @@ class Kernel:
 
         new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
         return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
-      return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=op.arg)
-    # NOTE: rewrite with an empty PatternMatcher to dedup UOps
+      return op.replace(src=tuple(fixup_ast(x) for x in op.src))
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda ctx, s0,s1: s0.replace(arg=s1.st)),
-      (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
-       lambda ctx, e, v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
-      (UPat(Ops.SINK, name="op"), lambda ctx, op: None if op.arg else op.replace(arg = KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals)))
+      (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
+      (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+      (UPat(Ops.SINK, name="op"), lambda ctx,op: None if op.arg else op.replace(arg = KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
     ]), self)
 
   def get_optimized_ast_group(self) -> UOp:
