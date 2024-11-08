@@ -635,14 +635,16 @@ class Kernel:
             srcs = []
             for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
               bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
-              st = self.sts[bufs_for_tc[i]]
-              srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
+              src = src.view(self.sts[bufs_for_tc[i]])
+              if pat: src = src.view(fix_st(tc, *pat, src.st))
+              srcs.append(src)
               if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
                 local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
-                local_st = ShapeTracker.from_shape(local_shape)
-                membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", local_st.real_size()))
-                local_store = UOp(Ops.STORE, tc.dtype_in, (membuf, (fix_st(tc, *pat, local_st) if pat else local_st).to_uop(), srcs[i]))
-                srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (membuf, local_st.to_uop(), local_store))
+                st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+                local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
+                local_store = UOp.store(local_buffer, st_uop, srcs[i])
+                if pat: local_store = local_store.view(fix_st(tc, *pat, local_store.st))
+                srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
             if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
               upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
@@ -683,6 +685,7 @@ class Kernel:
 
       return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
+      (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
       (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
       (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
       (UPat(Ops.SINK, name="op"), lambda ctx,op: None if op.arg else op.replace(arg = KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
