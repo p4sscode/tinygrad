@@ -609,9 +609,8 @@ class Kernel:
   def get_optimized_ast_tc(self) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
-      if op.op in GroupOp.Buffer:
-        st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(st)
+      if op.op in GroupOp.Buffer and op.src[0].op is not Ops.DEFINE_LOCAL:
+        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(self.sts[self.bufs.index(op)])
       if op.op is Ops.REDUCE_AXIS and (tc := self.tensor_core):
         reduce_idx = len(self.bufs) # no double reduce for tc
         axis = tuple(i for i in range(self.first_reduce, self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
@@ -633,8 +632,7 @@ class Kernel:
           for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
             bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
             st = self.sts[bufs_for_tc[i]]
-            if pat: st = fix_st(tc, *pat, st)
-            srcs.append(src.view(st))
+            srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
             if self.use_tensor_cores == 3:
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
               local_st = ShapeTracker.from_shape(local_shape)
