@@ -633,7 +633,7 @@ class Kernel:
             bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
             st = self.sts[bufs_for_tc[i]]
             srcs.append(src.view(fix_st(tc, *pat, st) if pat else st))
-            if self.use_tensor_cores == 3:
+            if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
               local_st = ShapeTracker.from_shape(local_shape)
               membuf = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", local_st.real_size()))
@@ -650,7 +650,7 @@ class Kernel:
               UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
             ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
-          else: # TC=3, emulate the warp addressing with locals, MUL/SUM instead of WMMA
+          else: # for TC=3 MUL/SUM instead of WMMA
             ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, reduce_axes))
 
         else: # for TC=2, we can't do the shapetracker fixup, MUL/SUM instead of WMMA
