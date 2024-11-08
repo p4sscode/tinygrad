@@ -610,9 +610,8 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       arg = op.arg
-      if op.op in GroupOp.Buffer:
-        st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
-        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(st)
+      if op.op in GroupOp.Buffer and op.src[0].op is not Ops.DEFINE_LOCAL:
+        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(self.sts[self.bufs.index(op)])
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
@@ -630,7 +629,7 @@ class Kernel:
               assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
               new_shape = st1.shape[:tcd] + tc.expanded_shape + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
               permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in local_pattern]+list(range(wd+len(warp_dims), tcd)) + \
-                                            [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
+                                           [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
               return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
             srcs = []
