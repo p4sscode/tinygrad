@@ -632,12 +632,11 @@ class Kernel:
                                            [y + (wd if x == 0 else tcd) for x,y in tc_pattern]+list(range(tcd+len(tc.expanded_shape), len(new_shape)))
               return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-            srcs = []
-            for i, (src, pat) in enumerate(zip(rsrc.src, [tc.st1_pattern, tc.st2_pattern])):
+            srcs = list(rsrc.src)
+            for i, pat in enumerate([tc.st1_pattern, tc.st2_pattern]):
               bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
-              src = src.view(self.sts[bufs_for_tc[i]])
-              if pat: src = src.view(fix_st(tc, *pat, src.st))
-              srcs.append(src)
+              srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
+              if pat: srcs[i] = srcs[i].view(fix_st(tc, *pat, srcs[i].st))
               if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
                 local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
                 st_uop = ShapeTracker.from_shape(local_shape).to_uop()
