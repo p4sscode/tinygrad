@@ -665,7 +665,7 @@ class Kernel:
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
 
-        elif self.group_for_reduces and second_axis:
+        if self.group_for_reduces and second_axis:
           first_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=arg)
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
