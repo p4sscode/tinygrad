@@ -625,16 +625,18 @@ class Kernel:
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
-          def fix_st(tc, local_pattern, upcast_pattern, st1):
-            warp_dims, tcd_dims = tuple(sz for _, sz in tc.threads), tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
-            wd, tcd = self.global_dims, self.first_upcast
-            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-            new_shape = st1.shape[:tcd] + tc.expanded_shape + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
+          def fix_st(tc, local_pattern, upcast_pattern, st):
+            wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
+            assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
+
+            tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
+            assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
+
+            new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + \
               [y + (wd if x == 0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims), tcd)) + \
               [y + (wd if x == 0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape), len(new_shape)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+            return st.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st.shape).simplify()
 
           srcs = list(rsrc.src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
