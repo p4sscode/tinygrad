@@ -625,7 +625,7 @@ class Kernel:
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
-          def fix_st(local_pattern, upcast_pattern, st):
+          def fix_st(st, local_pattern, upcast_pattern):
             wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
 
@@ -643,14 +643,14 @@ class Kernel:
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
             bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
             srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
-            if tc_pattern: srcs[i] = srcs[i].view(fix_st(*tc_pattern, srcs[i].st))
+            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st_uop = ShapeTracker.from_shape(local_shape).to_uop()
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st_uop.arg.real_size()))
               local_store = UOp.store(local_buffer, st_uop, srcs[i])
-              if tc_pattern: local_store = local_store.view(fix_st(*tc_pattern, local_store.st))
+              if tc_pattern: local_store = local_store.view(fix_st(local_store.st, *tc_pattern))
 
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
