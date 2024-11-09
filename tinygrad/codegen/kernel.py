@@ -641,12 +641,14 @@ class Kernel:
             bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
             srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
             if tc_pattern: srcs[i] = srcs[i].view(fix_st(tc, *tc_pattern, srcs[i].st))
-            if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
+
+            if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st_uop.arg.real_size()))
               local_store = UOp.store(local_buffer, st_uop, srcs[i])
               if tc_pattern: local_store = local_store.view(fix_st(tc, *tc_pattern, local_store.st))
+
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
