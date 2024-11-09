@@ -688,7 +688,7 @@ class Kernel:
       # (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
       (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
       (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
-      (UPat(Ops.SINK, name="op"), lambda ctx,op: None if op.arg else op.replace(arg = KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
+      (UPat(Ops.SINK, name="op"), lambda ctx,op: None if op.arg else op.replace(arg=KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
     ]), self)
 
   # **** this is the lowerer ****
