@@ -620,63 +620,59 @@ class Kernel:
         second_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
 
         arg = (op.arg[0], axis)
-        if (tc := self.tensor_core):
+        if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
-          if self.use_tensor_cores == 1 or self.use_tensor_cores == 3:
-            def fix_st(tc, local_pattern, upcast_pattern, st1):
-              warp_dims, tcd_dims = tuple(sz for _, sz in tc.threads), tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
-              wd, tcd = self.global_dims, self.first_upcast
-              assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-              assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-              new_shape = st1.shape[:tcd] + tc.expanded_shape + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-              permaxis = list(range(wd)) + \
-                [y + (wd if x == 0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims), tcd)) + \
-                [y + (wd if x == 0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape), len(new_shape)))
-              return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+          def fix_st(tc, local_pattern, upcast_pattern, st1):
+            warp_dims, tcd_dims = tuple(sz for _, sz in tc.threads), tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
+            wd, tcd = self.global_dims, self.first_upcast
+            assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
+            assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
+            new_shape = st1.shape[:tcd] + tc.expanded_shape + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
+            permaxis = list(range(wd)) + \
+              [y + (wd if x == 0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims), tcd)) + \
+              [y + (wd if x == 0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape), len(new_shape)))
+            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
-            srcs = list(rsrc.src)
-            for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-              bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
-              srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
-              if tc_pattern: srcs[i] = srcs[i].view(fix_st(tc, *tc_pattern, srcs[i].st))
-              if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
-                local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
-                st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-                local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
-                local_store = UOp.store(local_buffer, st_uop, srcs[i])
-                if tc_pattern: local_store = local_store.view(fix_st(tc, *tc_pattern, local_store.st))
-                srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
+          srcs = list(rsrc.src)
+          for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
+            bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
+            srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
+            if tc_pattern: srcs[i] = srcs[i].view(fix_st(tc, *tc_pattern, srcs[i].st))
+            if self.use_tensor_cores == 3: # for TC=3, emulate the warp addressing with locals
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i,s in enumerate(self.full_shape))
+              st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i+1}", st_uop.arg.real_size()))
+              local_store = UOp.store(local_buffer, st_uop, srcs[i])
+              if tc_pattern: local_store = local_store.view(fix_st(tc, *tc_pattern, local_store.st))
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
-            if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
-              upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
-              wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
-              wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
-              wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-                UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
-                UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
-                UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-              ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
+          if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
+            upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
+            wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
+            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
+            ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
-            else: # for TC=3 MUL/SUM instead of WMMA
-              ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, reduce_axes))
-
-          else: # for TC=2, we can't do the shapetracker fixup, MUL/SUM instead of WMMA
-            ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((fixup_ast(rsrc.src[0]) * fixup_ast(rsrc.src[1])),), (Ops.ADD, reduce_axes))
+          else: # for TC=3 MUL/SUM instead of WMMA
+            ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, reduce_axes))
 
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
 
         if self.group_for_reduces and second_axis:
-          start = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=arg)
+          first_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=arg)
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
+          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, first_reduce)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
           if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
