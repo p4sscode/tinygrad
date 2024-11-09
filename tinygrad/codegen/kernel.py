@@ -641,8 +641,7 @@ class Kernel:
 
           srcs = list(rsrc.src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            bufs_for_tc = next(iter(self.bufs_for_tensor_core.values()))
-            srcs[i] = srcs[i].view(self.sts[bufs_for_tc[i]])
+            srcs[i] = srcs[i].view(self.sts[self.bufs_for_tensor_core[op][i]])
             if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
