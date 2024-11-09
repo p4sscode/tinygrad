@@ -614,9 +614,13 @@ class Kernel:
         return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(self.sts[self.bufs.index(op)])
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
-                    if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
-        arg = (op.arg[0], axis)
+
+        def get_axis(start, stop):
+          return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        first_axis = get_axis(self.first_reduce+self.group_for_reduces, self.shape_len)
+        second_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
+
+        arg = (op.arg[0], first_axis)
         if (tc := self.tensor_core):
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
@@ -662,15 +666,15 @@ class Kernel:
           else: # for TC=2, we can't do the shapetracker fixup, MUL/SUM instead of WMMA
             ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((fixup_ast(rsrc.src[0]) * fixup_ast(rsrc.src[1])),), (Ops.ADD, reduce_axes))
 
-          new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
+          new_reduce_axes = tuple(i for i in first_axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
 
-        if self.group_for_reduces:
+        if self.group_for_reduces and second_axis:
           start = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=arg)
-          second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
-                      if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
-          # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
-          if len(second_axis) == 0: return start
+          # second_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
+
+          # # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
+          # if len(second_axis) == 0: return start
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
