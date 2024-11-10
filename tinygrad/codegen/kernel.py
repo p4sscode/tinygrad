@@ -625,14 +625,14 @@ class Kernel:
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
-          def fix_st(st, local_pattern, upcast_pattern):
+          def fix_st(st: ShapeTracker, local_pattern: Tuple[Tuple[int,int], ...], upcast_pattern: Tuple[Tuple[int,int], ...]):
             wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
-            assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-
             tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
-            assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
 
+            assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
+            assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             assert tc.expanded_shape is not None
+
             new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + \
               [y + (wd if x == 0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims), tcd)) + \
@@ -642,7 +642,7 @@ class Kernel:
           srcs = list(rsrc.src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
             srcs[i] = srcs[i].view(self.sts[self.bufs_for_tensor_core[op][i]])
-            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
+            if tc_pattern and srcs[i].has_st: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -684,6 +684,7 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
+
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
       # (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s1.st)),
       (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
