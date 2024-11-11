@@ -616,11 +616,10 @@ class Kernel:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
 
         def get_axis(start, stop):
-          return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+          return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         axis = get_axis(self.first_reduce+self.group_for_reduces, self.shape_len)
-        second_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
+        grouped_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
 
-        arg = (op.arg[0], axis)
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
@@ -641,8 +640,9 @@ class Kernel:
 
           srcs = list(rsrc.src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            srcs[i] = srcs[i].view(self.sts[self.bufs_for_tensor_core[op][i]])
-            if tc_pattern and srcs[i].has_st: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
+            st = self.sts[self.bufs_for_tensor_core[op][i]]
+            srcs[i] = srcs[i].view(st)
+            if tc_pattern and srcs[i].has_st: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -669,19 +669,21 @@ class Kernel:
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
           return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
 
-        if self.group_for_reduces and second_axis:
-          first_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=arg)
+        if self.group_for_reduces and grouped_axis:
+          reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=(op.arg[0], axis))
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, first_reduce)))
-          grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
+          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, reduce)))
+          grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axis))
           if op is self.reduceops[-1]: return grouped_reduce
-          st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
+          st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
+
+        arg = (op.arg[0], axis)
 
       return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
 
