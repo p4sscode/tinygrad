@@ -40,6 +40,11 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
   # default const render
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
+  # VCONST
+  (UPat(Ops.VCONST, name="x"),
+   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
+    (f"{{{','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])}}}" if ctx.device == "CLANG" else
+      f"({','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])})")),
   # new load/store
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx'))),
    lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
@@ -138,7 +143,7 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SPECIAL:
         r[u] = u.arg[0]
       else:
-        prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
+        prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const", Ops.VCONST: "vconst",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
