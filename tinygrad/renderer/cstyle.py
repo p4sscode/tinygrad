@@ -18,7 +18,12 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = {ctx[x.src[0]]}; {ctx[x]} < {ctx[x.src[1]]}; {ctx[x]}++) {{"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device == "CLANG" else f"({','.join([ctx[y] for y in x.src])})")),
+    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device == "CLANG" else
+      f"({','.join([ctx[y] for y in x.src])})")),
+  (UPat(Ops.VCONST, name="x"),
+   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
+    (f"{{{','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])}}}" if ctx.device == "CLANG" else
+      f"({','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])})")),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(*(({ctx.buffer_prefix}{ctx.render_dtype(x.dtype)}*)&{ctx[x.src[0]]}))"),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.arg[1]}];"),
@@ -40,11 +45,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
   # default const render
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
-  # VCONST
-  (UPat(Ops.VCONST, name="x"),
-   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])}}}" if ctx.device == "CLANG" else
-      f"({','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])})")),
   # new load/store
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx'))),
    lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
