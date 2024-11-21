@@ -653,7 +653,12 @@ class Kernel:
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
             wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
-            tc_uop = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(srcs[0],srcs[1],UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
+            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
+            tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
+            # tc_uop = UOp(Ops.WMMA, tc.dtype_out.vec(wmma_sz[2]), (srcs[0], srcs[1], UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), wmma_arg)
 
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
