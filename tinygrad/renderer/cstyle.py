@@ -265,7 +265,8 @@ class MetalRenderer(CStyleLanguage):
     # st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
     # st2_pattern=(((0,0),(0,1),(0,2),(0,3)),((0,1),(1,1),(1,2),(1,3))),
     dtype_in=di,dtype_out=do,
-    reduce_axes=[(0,2),(1,2),(2,2)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
+    reduce_axes=[(0,2),(1,2),(2,2)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
+                                                                (dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
