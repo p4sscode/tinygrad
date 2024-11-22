@@ -412,7 +412,7 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     used_dtypes = uops_to_dtypes(uops)
-    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("struct hip_bfloat16 { unsigned short data; };")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
