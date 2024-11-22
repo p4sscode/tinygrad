@@ -364,7 +364,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
     upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half), (dtypes.float, dtypes.bfloat16)]]
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half), (dtypes.bfloat16, dtypes.float), (dtypes.bfloat16, dtypes.bfloat16)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
