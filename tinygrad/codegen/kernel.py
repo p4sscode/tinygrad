@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callab
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, PatternMatcher, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-    graph_rewrite, track_rewrites, UPat
+    graph_rewrite, track_rewrites, UPat, view_left
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -623,32 +623,9 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
-            tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
-
-            assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-            assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-            assert tc.expanded_shape is not None
-
-            new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tc.expanded_shape),len(new_shape)))
-            return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
-
-          srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc_pattern))
-
-            if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
-              st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
-              if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
-              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
-
           tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
+          srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
@@ -660,6 +637,11 @@ class Kernel:
             tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
+            for i, src in enumerate(srcs): # for TC=3, emulate the warp addressing with locals
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
+              st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st_uop.arg.real_size()))
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, src)))
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
@@ -681,15 +663,19 @@ class Kernel:
 
       return ret
 
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
-      (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
 
   # **** this is the lowerer ****
 
   @track_rewrites()
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
+    if self.tensor_core and self.use_tensor_cores == 1: modified_ast = graph_rewrite(graph_rewrite(modified_ast, PatternMatcher([
+        (UPat(Ops.WMMA, name="w", src=(UPat(Ops.CONTRACT),UPat(),UPat())),lambda ctx,w:
+         w.replace(src=(w.src[0].permute(tc_swizzle(ctx,w.src[0].st,*pat)),w.src[1],w.src[2])) if (pat:=ctx.tensor_core.st1_pattern) else None),
+        (UPat(Ops.WMMA, name="w", src=(UPat(),UPat(Ops.CONTRACT),UPat())),lambda ctx,w:
+         w.replace(src=(w.src[0],w.src[1].permute(tc_swizzle(ctx,w.src[1].st,*pat)),w.src[2])) if (pat:=ctx.tensor_core.st2_pattern) else None),
+      ]), self), view_left)
 
     if DEBUG >= 3:
       print(self.name)
@@ -719,6 +705,11 @@ class Kernel:
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
 # the living definition of intermediate UOps
+
+def tc_swizzle(ctx, st: ShapeTracker, wd_pattern, tcd_pattern):
+  wd, tcd = ctx.global_dims, ctx.first_upcast
+  return tuple(list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(wd_pattern),tcd)) + \
+                                 [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape))))
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
