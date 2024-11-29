@@ -617,7 +617,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 1
     single_load = [x for x in sink.sparents if x.op is Ops.LOAD][0]
-    self.assertEqual(single_load.src[1].op, Ops.VECTORIZE)
+    self.assertEqual(single_load.src[1].op, Ops.VCONST)
 
   def test_simple_load_dont_fold_different_gated(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())

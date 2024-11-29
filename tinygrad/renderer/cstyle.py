@@ -18,7 +18,12 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = {ctx[x.src[0]]}; {ctx[x]} < {ctx[x.src[1]]}; {ctx[x]}++) {{"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device == "CLANG" else f"({','.join([ctx[y] for y in x.src])})")),
+    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device == "CLANG" else
+      f"({','.join([ctx[y] for y in x.src])})")),
+  (UPat(Ops.VCONST, name="x"),
+   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
+    (f"{{{','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])}}}" if ctx.device == "CLANG" else
+      f"({','.join([ctx.string_rewrite.rewrite(UOp.const(x.dtype.scalar(), y), ctx=ctx) for y in x.arg])})")),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(*(({ctx.buffer_prefix}{ctx.render_dtype(x.dtype)}*)&{ctx[x.src[0]]}))"),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.arg[1]}];"),
@@ -138,7 +143,7 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SPECIAL:
         r[u] = u.arg[0]
       else:
-        prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
+        prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const", Ops.VCONST: "cast",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
@@ -147,7 +152,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST}
+      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or (u.op in {Ops.VECTORIZE, Ops.VCONST, *GroupOp.ALU, Ops.CAST, Ops.BITCAST}
                                                         and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:
