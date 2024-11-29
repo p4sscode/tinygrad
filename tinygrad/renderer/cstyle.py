@@ -364,7 +364,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
     upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half), (dtypes.bfloat16, dtypes.float), (dtypes.bfloat16, dtypes.bfloat16)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
@@ -415,12 +415,14 @@ class AMDRenderer(CStyleLanguage):
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
-    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-      if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
-      else: prefix.append(f"static inline __attribute__((device)) half8 __{arg[0]}"+"""(half16 a, half16 b, half8 c) {
-  half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
-  c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-  for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
+    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
+      if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_{dt_map[arg[2]]}_w32")
+      else: prefix.append("static inline __attribute__((device)) " + \
+f"""{(dtype_out:=self.render_dtype(arg[3].vec(8)))} __{arg[0]} ({(dtype_in:=self.render_dtype(arg[2].vec(16)))} a, {dtype_in} b, {dtype_out} c) {{
+  {dtype_in} c_frag = {{}}; for (int n = 0; n < 8; n++) {{ c_frag[n*2] = c[n]; }}
+  c_frag = __builtin_amdgcn_wmma_{dt_map[arg[2]]}_16x16x16_{dt_map[arg[2]]}_w32(a, b, c_frag, false);
+  {dtype_out} d_out = {{}}; for (int n = 0; n < 8; n++) {{ d_out[n] = c_frag[n*2]; }}\n  return d_out;\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str:
