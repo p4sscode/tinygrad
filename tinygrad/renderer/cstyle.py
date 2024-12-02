@@ -361,9 +361,20 @@ class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
-    upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+  tensor_cores = [
+    TensorCore(
+      dims=(16, 16, 16), dtype_in=di, dtype_out=do, opts_seq=("LC", "UP"),
+      threads=[(0, 2),(0, 2),(0, 2),(1, 2),(1, 2)],
+      reduce_axes=[(0, 2),(1, 2),(2, 2),(3, 2)],
+      upcast_axes=([(3, 2),(2, 2),(1, 2),(0, 2)], [(3, 2),(2, 2),(1, 2),(0, 2)], [(6, 2),(5, 2),(4, 2)]),
+      # pat=(((0,0),(0,1),(0,2),(0,3),(0,4)),((1,0),(1,1),(1,2),(1,3),(1,4),(1,5)))
+      st1_pattern=(((0,3),(0,4),(1,5),(1,6),(0,1)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,2),(0,0))),
+      st2_pattern=(((0,0),(0,1),(0,2),(1,4),(0,4)),((1,0),(1,1),(1,2),(1,3),(0,3),(1,5),(1,6))),
+      st3_pattern=(((0,0),(0,1),(0,2),(1,4),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4),(1,5),(1,6))),
+      upcast_shape=((0,2),(1,2),(1,2)),
+    )
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]
+  ]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
