@@ -676,8 +676,12 @@ class Kernel:
 
       return ret
 
-    view_store = PatternMatcher([(UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda v,b,st: b.store(st, v.src[0]).view(v.arg))])
-    return graph_rewrite(fixup_ast(self.ast), view_left + view_store)
+    view_store = PatternMatcher([
+      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda v,b,st: b.store(st, v.src[0]).view(v.arg)),
+      (UPat.var("b").store(UPat.var("st"), UPat(Ops.CAST, src=UPat(Ops.VIEW, name="v"), name="c")),
+       lambda v,b,c,st: b.store(st, v.src[0].cast(c.dtype)).view(v.arg)),
+      ])
+    return graph_rewrite(fixup_ast(self.ast), view_store + view_left)
 
   # **** this is the lowerer ****
 
