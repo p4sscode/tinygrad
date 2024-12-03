@@ -675,11 +675,9 @@ class Kernel:
 
       return ret
 
-    view_right = merge_views + PatternMatcher([
+    return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), merge_views + PatternMatcher([
       (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: apply_swizzle(b.store(st,v.src[0]), v.arg)),
-      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS), name="root"), push_swizzle_down_through_elementwise),
-    ])
-    return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right)
+      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS), name="root"), push_swizzle_down_through_elementwise)]))
 
   # **** this is the lowerer ****
 
