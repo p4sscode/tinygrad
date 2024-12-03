@@ -617,9 +617,7 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
-        ret = ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-        # if op.op is Ops.STORE and (tc:=self.tensor_core) and tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.st3_pattern))
-        return ret
+        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
@@ -658,7 +656,7 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
-          if tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).reduce(tc_reduce_axes+new_reduce_axes), *tc.st3_pattern))
+          if tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.st3_pattern))
           return ret
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
@@ -678,9 +676,7 @@ class Kernel:
 
     view_right = merge_views + PatternMatcher([
       (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: apply_swizzle(b.store(st,v.src[0]), v.arg)),
-      (UPat.var("b").store(UPat.var("st"), UPat(Ops.ASSIGN, name="a")),
-       lambda b,st,a: apply_swizzle(b.store(st,a.replace(arg=None)), a.arg) if a.arg else None),
-      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS), name="root"), push_swizzle_down_through_elementwise),
     ])
     return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right)
 
@@ -718,18 +714,6 @@ class Kernel:
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
 # the living definition of intermediate UOps
-
-# def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-#   swizzles = [x for x in root.src if x.base is not x]
-#   if len(swizzles) == 0: return None
-#   swizzle_st = [(unwrap(x.st), unwrap(x.src[0].st)) for x in swizzles]
-#   assert all_same([(x.shape, y.shape) for x,y in swizzle_st]), f"swizzles must have the same shape {swizzle_st}"
-#   new_st, new_input_st = swizzle_st[0]
-#   new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src)
-#   ret = root.replace(src=new_src)
-#   # update the ASSIGN offset to match the new shape
-#   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
-#   return ret if ret.op is Ops.STORE else ret.view(new_st)
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
