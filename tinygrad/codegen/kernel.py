@@ -677,7 +677,7 @@ class Kernel:
       return ret
 
     view_right = merge_views + PatternMatcher([
-      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: b.store(st,v.src[0]).view(v.arg)),
+      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: b.store(st.view(v.arg),v.src[0])),
       (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
     ])
     return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right)
@@ -720,14 +720,14 @@ class Kernel:
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.base is not x]
   if len(swizzles) == 0: return None
-  swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
-  assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
-  new_shape, new_input_shape = swizzle_shapes[0]
-  new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src)
+  swizzle_st = [(unwrap(x.st), unwrap(x.src[0].st)) for x in swizzles]
+  # assert all_same([(x.shape, prod(x.shape), prod(y.shape)) for x,y in swizzle_st]), f"swizzles must have the same size {swizzle_st}"
+  new_st, new_input_st = swizzle_st[0]
+  new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src)
   ret = root.replace(src=new_src)
   # update the ASSIGN offset to match the new shape
-  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+ShapeTracker.from_shape(new_input_shape),)
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(new_shape))
+  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
+  return ret if ret.op is Ops.STORE else ret.view(new_st)
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
