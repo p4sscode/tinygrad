@@ -605,10 +605,6 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self) -> UOp:
-    def get_tc_swizzle_st(shape: Tuple[sint, ...], wd_pattern, tcd_pattern):
-      st, wd, tcd = ShapeTracker.from_shape(shape), self.global_dims, self.first_upcast
-      return st.permute(tuple(list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern] + list(range(wd+len(wd_pattern),tcd)) + \
-                                    [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))))
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
@@ -625,6 +621,11 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
+          def get_tc_swizzle_st(shape: Tuple[sint, ...], wd_pattern, tcd_pattern):
+            st, wd, tcd = ShapeTracker.from_shape(shape), self.global_dims, self.first_upcast
+            return st.permute(tuple(list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern] + list(range(wd+len(wd_pattern),tcd)) + \
+                                          [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))))
+
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
             if tc_pattern: srcs[i] = srcs[i].view(get_tc_swizzle_st((srcs[i] if srcs[i].op is Ops.LOAD else srcs[i].src[0]).st_arg.shape,*tc_pattern))
