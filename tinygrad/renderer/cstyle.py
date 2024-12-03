@@ -365,7 +365,7 @@ class AMDRenderer(CStyleLanguage):
   tensor_cores = [TensorCore(dims=(16, 16, 16), upcast_axes=([(3,2),(2,2),(1,2),(0,2)],[(3,2),(2,2),(1,2),(0,2)],[(6,2),(5,2),(4,2)]),
       st1_pattern=(((0,3),(0,4),(1,5),(1,6),(0,1)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,2),(0,0))), reduce_axes=[(0, 2),(1, 2),(2, 2),(3, 2)],
       st2_pattern=(((0,0),(0,1),(0,2),(1,4),(0,4)),((1,0),(1,1),(1,2),(1,3),(0,3),(1,5),(1,6))), threads=[(0, 2),(0, 2),(0, 2),(1, 2),(1, 2)],
-      st3_pattern=(((0,0),(0,1),(0,2),(1,4),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4),(1,5),(1,6))), dtype_in=di, dtype_out=do)
+      st3_pattern=(((0,0),(0,1),(0,2),(1,4),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4),(1,5),(1,6))), opts_seq=("LC","UP"), dtype_in=di, dtype_out=do)
     for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
 
   # language options
