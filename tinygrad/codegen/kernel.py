@@ -653,7 +653,7 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
-          if tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.st3_pattern))
+          if self.use_tensor_cores == 1 and tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.st3_pattern))
           return ret
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
