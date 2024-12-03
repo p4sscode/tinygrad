@@ -632,7 +632,7 @@ class Kernel:
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = srcs[i].view(get_tc_swizzle_st((srcs[i] if srcs[i].op is Ops.LOAD else srcs[i].src[0]).st_arg.shape, *tc_pattern))
+            if tc_pattern: srcs[i] = srcs[i].view(get_tc_swizzle_st((srcs[i] if srcs[i].op is Ops.LOAD else srcs[i].src[0]).st_arg.shape,*tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -677,10 +677,14 @@ class Kernel:
       return ret
 
     view_right = merge_views + PatternMatcher([
-      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: b.store(st.view(v.arg),v.src[0])),
+      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")),
+       lambda b,st,v: apply_swizzle(b.store(st,v.src[0]), v.arg)),
+      (UPat.var("b").store(UPat.var("st"), UPat(Ops.ASSIGN, name="a")),
+       lambda b,st,a: apply_swizzle(b.store(st,a.replace(arg=None)), a.arg) if a.arg else None),
       (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
     ])
     return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right)
+    # return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), PatternMatcher([]))
 
   # **** this is the lowerer ****
 
@@ -721,9 +725,9 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.base is not x]
   if len(swizzles) == 0: return None
   swizzle_st = [(unwrap(x.st), unwrap(x.src[0].st)) for x in swizzles]
-  # assert all_same([(x.shape, prod(x.shape), prod(y.shape)) for x,y in swizzle_st]), f"swizzles must have the same size {swizzle_st}"
+  assert all_same([(x.shape, y.shape) for x,y in swizzle_st]), f"swizzles must have the same shape {swizzle_st}"
   new_st, new_input_st = swizzle_st[0]
-  new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src)
+  new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else (apply_swizzle(x, new_input_st) if x.st.shape == new_input_st.shape else x) for x in root.src)
   ret = root.replace(src=new_src)
   # update the ASSIGN offset to match the new shape
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
