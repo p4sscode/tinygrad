@@ -14,7 +14,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.engine.schedule import apply_swizzle, push_swizzle_down_through_elementwise
+from tinygrad.engine.schedule import push_swizzle_down_through_elementwise
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
@@ -676,8 +676,7 @@ class Kernel:
       return ret
 
     return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), merge_views + PatternMatcher([
-      (UPat.var("b").store(UPat.var("st"), UPat(Ops.VIEW, name="v")), lambda b,st,v: apply_swizzle(b.store(st,v.src[0]), v.arg)),
-      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS), name="root"), push_swizzle_down_through_elementwise)]))
+      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise)]))
 
   # **** this is the lowerer ****
 

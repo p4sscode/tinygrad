@@ -119,6 +119,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzle_sts = [(unwrap(x.st), unwrap(x.src[0].st)) for x in swizzles]
   assert all_same([(prod(x.shape), prod(y.shape)) for x,y in swizzle_sts]), f"swizzles must have the same size {swizzle_sts}"
   new_st, new_input_st = swizzle_sts[0]
+  if new_st.shape == new_input_st.shape: new_input_st = new_st
   new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src)
   ret = root.replace(src=new_src)
   # update the ASSIGN offset to match the new shape
