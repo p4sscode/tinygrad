@@ -226,7 +226,7 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,2),(0,2),(0,2)],reduce_axes=[(0,8),(1,2)],upcast_axes=([(1,16)],[(1,16)],[(2,8)]),
+  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,2),(0,2),(0,2)],reduce_axes=[(0,2),(1,2),(2,2),(3,2)],upcast_axes=([(3,16)],[(3,16)],[(4,8)]),
                              st1_pattern=(((1,0),(1,1),(1,2)),((1,4),(1,3),(0,0),(0,1),(0,2))),dtype_in=di,dtype_out=do)
                              for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
