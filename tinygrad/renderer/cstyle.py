@@ -312,16 +312,10 @@ class CUDARenderer(CStyleLanguage):
   tensor_cores_f64 = [TensorCore(dims=(8,8,4),threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],
       st1_pattern=(((1,0),(1,1),(0,2),(0,3),(0,4)),((0,0),(0,1),(1,2))),reduce_axes=[(0,2),(1,2)],upcast_axes=[[(0,1)],[(0,1)],[(2,2)]],
       st2_pattern=(((1,0),(1,1),(1,2),(0,0),(0,1)),((0,2),(0,3),(0,4))),dtype_in=dtypes.float64,dtype_out=dtypes.float64)]
-  # tensor_cores_s8 = [
-  #   TensorCore(
-  #     dims=(8, 16, 32),
-  #     threads=[(0, 2), (0, 2), (1, 2), (1, 2), (1, 2)],
-  #     reduce_axes=[(0, 2), (1, 2), (2, 2), (3, 2), (4, 2)],
-  #     upcast_axes=[[(5,8)],[(5,4)],[(5,8)]],
-  #     dtype_in=dtypes.int8,
-  #     dtype_out=dtypes.int32,
-  #   )
-  # ]
+  tensor_cores_s8 = [TensorCore(dims=(8,16,32),st1_pattern=(((1,2),(1,3),(1,6),(0,2),(0,3)),((0,0),(0,1),(1,5),(1,4),(0,4),(1,1),(1,0))),
+      threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],st2_pattern=(((1,2),(1,3),(1,5),(0,0),(0,1)),((0,2),(0,3),(1,6),(0,4),(1,4),(1,1),(1,0))),
+      reduce_axes=[(0,2),(1,2),(2,2),(3,2),(4,2)],st3_pattern=(((0,0),(0,1),(1,6),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4),(1,5))),
+      upcast_axes=[[(3,2),(4,2),(5,2),(6,2)],[(4,2),(5,2),(6,2)],[(5,2),(6,2)]],dtype_in=dtypes.int8,dtype_out=dtypes.int32)]
   tensor_cores_80 = tensor_cores_81616 + tensor_cores_tf32 + tensor_cores_f64 + tensor_cores_s8
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores_80 if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
@@ -340,7 +334,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.int8: "int8_t"}
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -349,15 +343,15 @@ class CUDARenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
-    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))", "typedef signed char int8_t;"]
 
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count >= 4 and dt.scalar() in {dtypes.half, dtypes.bfloat16, dtypes.int8}]
 
-    dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.float: "tf32", dtypes.double: "f64", }
-    dt_map_out = { dtypes.half: "f16", dtypes.float: "f32", dtypes.double: "f64" }
+    dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.float: "tf32", dtypes.double: "f64", dtypes.int8: "s8"}
+    dt_map_out = { dtypes.half: "f16", dtypes.float: "f32", dtypes.double: "f64", dtypes.int32: "s32" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
@@ -366,12 +360,16 @@ class CUDARenderer(CStyleLanguage):
 
       # mma operands => {c}, {a}, {b}, {c}
       prefix.append(f"""__device__ {wmma_dtypes[2]} __{name}({wmma_dtypes[0]} a, {wmma_dtypes[1]} b, {wmma_dtypes[2]} c){{
-  double *a_pk = (double *)(&a), *b_pk = (double *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}"
+  {(ptr_dtype:=self.render_dtype(dtype_out.scalar()))} *a_pk = ({ptr_dtype} *)(&a), *b_pk = ({ptr_dtype} *)(&b);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}"
       "{{{", ".join(operands[:n_operands[2]])}}}, {{{", ".join(operands[n_operands[2]:n_operands[2]+n_operands[0]])}}},"
       "{{{", ".join(operands[-n_operands[1]:])}}}, {{{", ".join(operands[:n_operands[2]])}}};"
-    : {", ".join([f'"+d"(c.{_nms[i]})' for i in range(n_operands[2])])}
-    : {", ".join([f'"d"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"d"(b_pk[{i}])' for i in range(n_operands[1])])});
+    : {", ".join([f'"+r"(c.{_nms[i]})' for i in range(n_operands[2])])}
+    : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_operands[1])])});
   return c;\n}}""") # noqa:E501
+
+  # for double, +d and d and double*
+  # for int, +r and r and int*
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
