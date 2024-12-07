@@ -175,7 +175,7 @@ class ClangRenderer(CStyleLanguage):
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
 
   if AMX:
-    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
+    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=(), reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
       for dt, sz in [(dt, 64//dt.itemsize) for dt in [dtypes.float]]]
 
   def render_vector_prefix(self, dt:DType) -> str:
@@ -226,8 +226,8 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,2),(0,2),(0,2)],reduce_axes=[(0,2),(1,2),(2,2),(3,2)],upcast_axes=([(6,16)],[(6,16)],[(7,8)]),
-                             st1_pattern=(((1,0),(1,1),(1,2)),((1,6),(1,3),(1,4),(1,5),(0,0),(0,1),(0,2))),dtype_in=di,dtype_out=do)
+  tensor_cores = [TensorCore(dims=(8,8,16),threads=((0,2),(0,2),(0,2)),reduce_axes=[(0,2),(1,2),(2,2),(3,2)],upcast_axes=([(6,16)],[(6,16)],[(7,8)]),
+                             src1_swizzle=(((1,0),(1,1),(1,2)),((1,6),(1,3),(1,4),(1,5),(0,0),(0,1),(0,2))),dtype_in=di,dtype_out=do)
                              for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
   string_rewrite = PatternMatcher([
@@ -246,10 +246,10 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8),dtype_in=di,dtype_out=do,expanded_shape=(2,2,2,2),threads=[(0,2),(1,2),(1,2),(0,2),(1,2)],
-      st1_pattern=(((1,1),(0,1),(0,2),(1,2),(0,4)),((0,0),(0,3),(1,3),(1,0))),upcast_axes=([(3,2)],[(3,2)],[(3,2)]),
-      st2_pattern=(((0,0),(1,0),(1,1),(0,3),(1,2)),((0,1),(0,2),(0,4),(1,3))),reduce_axes=[(0,2),(1,2),(2,2)])
-    for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
+  tensor_cores = [TensorCore((8,8,8),dtype_in,dtype_out,threads=((0,2),(1,2),(1,2),(0,2),(1,2)),
+      src1_swizzle=(((1,1),(0,1),(0,2),(1,2),(0,4)),((0,0),(0,3),(1,3),(1,0))),upcast_axes=([(3,2)],[(3,2)],[(3,2)]),
+      src2_swizzle=(((0,0),(1,0),(1,1),(0,3),(1,2)),((0,1),(0,2),(0,4),(1,3))),reduce_axes=[(0,2),(1,2),(2,2)])
+    for dtype_in,dtype_out in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
                    (dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
@@ -298,19 +298,19 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
   # pat=(((0,0),(0,1),(0,2),(0,3),(0,4)),((1,0),(1,1),(1,2),(1,3),(1,4),(1,5))),
-  tensor_cores_81616 = [TensorCore(dims=(8,16,16),st1_pattern=(((1,1),(1,2),(1,5),(0,2),(0,3)),((1,0),(0,4),(1,3),(0,0),(0,1),(1,4))),
-      threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],st2_pattern=(((1,1),(1,2),(1,4),(0,0),(0,1)),((0,2),(0,3),(0,4),(1,0),(1,3),(1,5))),
-      reduce_axes=[(0,2),(1,2),(2,2),(3,2)],st3_pattern=(((0,0),(0,1),(1,5),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4))),
-      upcast_axes=([(2,2),(1,2),(0,2)],[(4,2),(3,2)],[(5,2),(4,2)]),dtype_in=di,dtype_out=do)
-    for di,do in ([(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float)])]
-  tensor_cores_tf32 = [TensorCore(dims=(8,16,8),st1_pattern=(((1,0),(1,1),(1,4),(0,2),(0,3)),((0,0),(1,3),(0,1),(1,2),(0,4))),
-      threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],st2_pattern=(((1,0),(1,1),(1,3),(0,0),(0,1)),((0,2),(0,3),(0,4),(1,4),(1,2))),
-      upcast_axes=[[(3,2),(4,2)],[(4,2)],[(4,2),(3,2)]],st3_pattern=(((0,0),(0,1),(1,4),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4))),
-      reduce_axes=[(0,2),(1,2),(2,2)],dtype_in=dtypes.float,dtype_out=dtypes.float)]
-  tensor_cores_s8 = [TensorCore(dims=(8,16,32),st1_pattern=(((1,2),(1,3),(1,6),(0,2),(0,3)),((0,0),(0,1),(1,5),(1,4),(0,4),(1,1),(1,0))),
-      threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],st2_pattern=(((1,2),(1,3),(1,5),(0,0),(0,1)),((0,2),(0,3),(1,6),(0,4),(1,4),(1,1),(1,0))),
-      reduce_axes=[(0,2),(1,2),(2,2),(3,2),(4,2)],st3_pattern=(((0,0),(0,1),(1,6),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4),(1,5))),
-      upcast_axes=[[(3,2),(4,2),(5,2),(6,2)],[(4,2),(5,2),(6,2)],[(5,2),(6,2)]],dtype_in=dtypes.int8,dtype_out=dtypes.int32)]
+  tensor_cores_81616 = [TensorCore((8,16,16), dtype_in, dtype_out, upcast_axes=([(2,2),(1,2),(0,2)],[(4,2),(3,2)],[(5,2),(4,2)]),
+                                   src1_swizzle=(((1,1),(1,2),(1,5),(0,2),(0,3)),((1,0),(0,4),(1,3),(0,0),(0,1),(1,4))),
+                                   src2_swizzle=(((1,1),(1,2),(1,4),(0,0),(0,1)),((0,2),(0,3),(0,4),(1,0),(1,3),(1,5))),
+                                   out_swizzle=(((0,0),(0,1),(1,5),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4))))
+                                   for dtype_in,dtype_out in ([(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float)])]
+  tensor_cores_tf32 = [TensorCore((8,16,8), dtypes.float, dtypes.float, upcast_axes=[[(3,2),(4,2)],[(4,2)],[(4,2),(3,2)]],
+                                  src1_swizzle=(((1,0),(1,1),(1,4),(0,2),(0,3)),((0,0),(1,3),(0,1),(1,2),(0,4))),
+                                  src2_swizzle=(((1,0),(1,1),(1,3),(0,0),(0,1)),((0,2),(0,3),(0,4),(1,4),(1,2))),
+                                  out_swizzle=(((0,0),(0,1),(1,4),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4))))]
+  tensor_cores_s8 = [TensorCore((8,16,32), dtypes.int8, dtypes.int32, upcast_axes=[[(3,2),(4,2),(5,2),(6,2)],[(4,2),(5,2),(6,2)],[(5,2),(6,2)]],
+                                src1_swizzle=(((1,2),(1,3),(1,6),(0,2),(0,3)),((0,0),(0,1),(1,5),(1,4),(0,4),(1,1),(1,0))),
+                                src2_swizzle=(((1,2),(1,3),(1,5),(0,0),(0,1)),((0,2),(0,3),(1,6),(0,4),(1,4),(1,1),(1,0))),
+                                out_swizzle=(((0,0),(0,1),(1,6),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4),(1,5))))]
   # slower than non tc alternative?
   # tensor_cores_f64 = [TensorCore(dims=(8,8,4),threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],
   #     st1_pattern=(((1,0),(1,1),(0,2),(0,3),(0,4)),((0,0),(0,1),(1,2))),reduce_axes=[(0,2),(1,2)],upcast_axes=[[(0,1)],[(0,1)],[(2,2)]],
@@ -365,7 +365,7 @@ class CUDARenderer(CStyleLanguage):
       "{{{", ".join(operands[-n_operands[1]:])}}}, {{{", ".join(operands[:n_operands[2]])}}};"
     : {", ".join([f'"+r"(c_pk[{i}])' for i in range(n_operands[2])])}
     : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_operands[1])])});
-  return c;\n}}""") # noqa:E501
+  return c;\n}}""")
 
   # for double, +d and d and double*
   # for int, +r and r and int*
@@ -383,9 +383,9 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   # pat=(((0,0),(0,1),(0,2),(0,3),(0,4)),((1,0),(1,1),(1,2),(1,3),(1,4),(1,5)))
   tensor_cores = [TensorCore(dims=(16, 16, 16), upcast_axes=([(3,2),(2,2),(1,2),(0,2)],[(3,2),(2,2),(1,2),(0,2)],[(6,2),(5,2),(4,2)]),
-      st1_pattern=(((0,3),(0,4),(1,5),(1,6),(0,1)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,2),(0,0))), reduce_axes=[(0, 2),(1, 2),(2, 2),(3, 2)],
-      st2_pattern=(((0,0),(0,1),(0,2),(1,4),(0,4)),((1,0),(1,1),(1,2),(1,3),(0,3),(1,5),(1,6))), threads=[(0, 2),(0, 2),(0, 2),(1, 2),(1, 2)],
-      st3_pattern=(((0,0),(0,1),(0,2),(1,4),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4),(1,5),(1,6))), opts_seq=("LC","UP"), dtype_in=di, dtype_out=do)
+      src1_swizzle=(((0,3),(0,4),(1,5),(1,6),(0,1)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,2),(0,0))), reduce_axes=[(0, 2),(1, 2),(2, 2),(3, 2)],
+      src2_swizzle=(((0,0),(0,1),(0,2),(1,4),(0,4)),((1,0),(1,1),(1,2),(1,3),(0,3),(1,5),(1,6))), threads=((0, 2),(0, 2),(0, 2),(1, 2),(1, 2)),
+      out_swizzle=(((0,0),(0,1),(0,2),(1,4),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4),(1,5),(1,6))), opts_seq=("LC","UP"), dtype_in=di, dtype_out=do)
     for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
 
   # language options

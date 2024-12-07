@@ -317,7 +317,7 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
+        for tc_dim, amt in (tc.reduce_axes or tc.get_reduce_axes()): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
         for opt in tc.opts_seq:
           if opt == "UP":
             for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False)
@@ -630,18 +630,18 @@ class Kernel:
                                           [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = srcs[i].view(get_tc_swizzle_st((srcs[i] if srcs[i].op is Ops.LOAD else srcs[i].src[0]).st_arg.shape,*tc_pattern))
+          for i, tc_swizzle in enumerate([tc.src1_swizzle, tc.src2_swizzle]):
+            if tc_swizzle: srcs[i] = srcs[i].view(get_tc_swizzle_st((srcs[i] if srcs[i].op is Ops.LOAD else srcs[i].src[0]).st_arg.shape,*tc_swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
-              if tc_pattern: store_st = get_tc_swizzle_st(local_shape, *tc_pattern)
+              if tc_swizzle: store_st = get_tc_swizzle_st(local_shape, *tc_swizzle)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
-          tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
+          tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in (tc.reduce_axes or tc.get_reduce_axes()))
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
@@ -657,7 +657,7 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
-          if self.use_tensor_cores == 1 and tc.st3_pattern: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.st3_pattern))
+          if self.use_tensor_cores == 1 and tc.out_swizzle: ret = ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.out_swizzle))
           return ret
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:

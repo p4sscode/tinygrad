@@ -1,5 +1,5 @@
 from typing import Optional, List, Tuple, Dict, Callable, Any
-import functools
+import functools, math
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
@@ -10,16 +10,19 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dims: Tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes: List[Tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
+  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))] # list of (TC dim,amt) that constructs the shape of the reduce dim
   @property
   def early_upcast_axes(self) -> List[Tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
     remainders = [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
     return [(x, 2) for x, count in remainders for _ in range(count // 2)]
   upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
-  st1_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
-  st2_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
-  st3_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for C/D
+  upcast_sizes: Optional[Tuple[int,int,int]] = None
+  def get_upcast_axes(self): return [[(i, 2) for i in range(int(math.log2(size)))] for size in self.upcast_sizes]
+  reduce_axes: Optional[List[Tuple[int,int]]] = None # list of (TC dim,amt) that constructs the shape of the reduce dim
+  threads: Tuple[Tuple[int,int], ...] = ((0,2),(0,2),(1,2),(1,2),(1,2)) # tuple of (TC dim,amt) that construct the warp thread structure
+  src1_swizzle: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
+  src2_swizzle: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
+  out_swizzle: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for C/D
   expanded_shape: Optional[Tuple[int, ...]] = None
   opts_seq: Tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims))) # + [self.dtype_in.name, self.dtype_out.name])
