@@ -14,10 +14,12 @@ ATOL = getenv("ATOL", 1e-4)
 RTOL = getenv("RTOL", 3e-2)
 
 if __name__ == "__main__":
-  a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
+  if dtype_in in dtypes.ints: a, b = Tensor.randint((M, K), dtype=dtype_in).realize(), Tensor.randint((K, N), dtype=dtype_in).realize()
+  else: a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
-      a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
+      if dtype_in in dtypes.ints: a, b = Tensor.randint((M, K), dtype=dtype_in).realize(), Tensor.randint((K, N), dtype=dtype_in).realize()
+      else: a, b = Tensor.rand(M, K, dtype=dtype_in).realize(), Tensor.rand(K, N, dtype=dtype_in).realize()
     c = a.matmul(b, acc_dtype=acc_dtype).realize()
   comp = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   nc = c.numpy()
