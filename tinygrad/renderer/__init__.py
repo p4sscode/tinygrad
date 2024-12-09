@@ -10,7 +10,8 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dims: Tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))] # list of (TC dim,amt) that constructs the shape of the reduce dim
+  # list of (TC dim,amt) that constructs the shape of the reduce dim
+  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   @property
   def early_upcast_axes(self) -> List[Tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
     remainders = [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
