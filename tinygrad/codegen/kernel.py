@@ -346,7 +346,7 @@ class Kernel:
     try: # check TC first and apply hand-coded opts if successful
       self.apply_opt(Opt(OptOps.TC, axis, tc_opt))
 
-      if (tc_opts:=self.tensor_core_opts) is not None:
+      if getenv("SKIP_TC_HC_OPTS", 0) or (tc_opts:=self.tensor_core_opts) is not None:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
