@@ -295,6 +295,11 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
+  # f16_f16_81616, f16_f32_81616, bf16_f32_81616
+  # (8,16,16) half, half / (8,16,16) half, float / (8,16,16) bfloat16, float
+  # swizzle_c => 2, 4, 8, 16, 32 - 1, 64
+  # swizzle_a => 2, 4, 16, 32, 64 - 1, 128, 8
+  # swizzle_b => 16, 32, 1, 2, 4 - 8, 64
   tensor_cores_81616 = [TensorCore((8,16,16), dtype_in, dtype_out, threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],
     upcast_axes=([(2,2),(1,2),(0,2)],[(4,2),(3,2)],[(5,2),(4,2)]),
     st1_pattern=(((1,1),(1,2),(1,5),(0,2),(0,3)),((1,0),(0,4),(1,3),(0,0),(0,1),(1,4))),
@@ -302,6 +307,11 @@ class CUDARenderer(CStyleLanguage):
     st3_pattern=(((0,0),(0,1),(1,5),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(1,4),(0,4))),
     reduce_axes=[(0,2),(1,2),(2,2),(3,2)])
     for dtype_in, dtype_out in ([(dtypes.half,dtypes.half),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  # s8_s32_81632, u8_s32_81632
+  # (8,16,32) signed char, signed int / (8,16,32) unsigned char, signed int
+  # swizzle_c => 2, 4, 8, 16, 32 - 64, 1
+  # swizzle_a => 4, 8, 32, 64, 128 - 16, 256, 2, 1
+  # swizzle_b => 32, 64, 1, 2, 4 - 128, 16, 8
   tensor_cores_81632 = [TensorCore((8,16,32), dtype_in, dtype_out, threads=[(0,2),(0,2),(1,2),(1,2),(1,2)],
     st1_pattern=(((1,2),(1,3),(1,6),(0,2),(0,3)),((0,0),(0,1),(1,5),(1,4),(0,4),(1,1),(1,0))),
     st2_pattern=(((1,2),(1,3),(1,5),(0,0),(0,1)),((0,2),(0,3),(1,6),(0,4),(1,4),(1,1),(1,0))),
@@ -309,6 +319,7 @@ class CUDARenderer(CStyleLanguage):
     reduce_axes=[(0,2),(1,2),(2,2),(3,2),(4,2)],
     upcast_axes=[[(3,2),(4,2),(5,2),(6,2)],[(4,2),(5,2),(6,2)],[(5,2),(6,2)]])
     for dtype_in, dtype_out in ([(dtypes.int8,dtypes.int32),(dtypes.uint8,dtypes.int32)])]
+  # tf32_f32_8168
   # (8,16,8) float, float
   # swizzle_c => 2, 4, 8, 16, 32 - 1, 64
   # swizzle_a => 1, 2, 8, 16, 32 - 4, 64
@@ -317,7 +328,7 @@ class CUDARenderer(CStyleLanguage):
     upcast_axes=[[(3,2),(4,2)],[(4,2)],[(4,2),(3,2)]],
     st1_pattern=(((1,0),(1,1),(1,4),(0,2),(0,3)),((0,0),(1,3),(0,1),(1,2),(0,4))),
     st2_pattern=(((1,0),(1,1),(1,3),(0,0),(0,1)),((0,2),(0,3),(0,4),(1,4),(1,2))),
-    st3_pattern=(((0,0),(0,1),(1,4),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4))),
+    st3_pattern=(((0,0),(0,1),(1,4),(0,2),(0,3)),((1,0),(1,1),(1,2),(1,3),(0,4 ))),
     reduce_axes=[(0,2),(1,2),(2,2)])]
   tensor_cores_80 = tensor_cores_81616 + tensor_cores_81632 + tensor_cores_8168
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores_80 if int(arch[3:]) >= 80 else [], arch
