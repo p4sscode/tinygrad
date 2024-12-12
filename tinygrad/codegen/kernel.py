@@ -624,9 +624,9 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            print(st)
+            # print(st)
             st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
-            print(st)
+            # print(st)
             # wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             wd = self.global_dims
             # tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
@@ -639,37 +639,27 @@ class Kernel:
                                          [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))
             # return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
             permuted = st.permute(tuple(permaxis))
-            print(permuted)
-            print("permaxis", tuple(permaxis))
+            # print(permuted)
+            print("Correct permaxis", tuple(permaxis))
             return permuted
 
-          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout):
-            # solution 1
-            # cont_st = ShapeTracker.from_shape(st.shape)
-            # wd, tcd = self.global_dims, self.first_upcast
-            # wrap_layout=list(x if isinstance(x, int) else int(x[:-1])*tc.dims["NMK".index(x[-1])] for x in layout[0])
-            # tcds_layout=list(x if isinstance(x, int) else int(x[:-1])*tc.dims["NMK".index(x[-1])] for x in layout[1])
-            # masked_strides = list(s if (i>=wd and i<wd+len(wrap_layout)) or (i>=tcd and i<tcd+len(tcds_layout)) else -1 for i,s in enumerate(st.real_strides())) # noqa:E501
-            # perm_1 = list(masked_strides.index(i) if i != 0 else -1 for i in wrap_layout)
-            # perm_2 = list(masked_strides.index(i) if i != 0 else -1 for i in tcds_layout)
-            # permaxis = list(range(wd)) + perm_1 + list(range(wd+len(wrap_layout),tcd)) + perm_2 + list(range(tcd+len(tcds_layout),len(st.shape)))
-            # zeors = iter([i for i, x in enumerate(masked_strides) if x == 0])
-            # fixed = [next(zeors) if x == -1 else x for x in permaxis]
-            # return cont_st.permute(tuple(fixed))
-            # solution 2
-            # print(st)
-            wd, tcd, strides, occurrences = self.global_dims, self.first_upcast, list(st.real_strides()), defaultdict(list)
-            strides[wd : wd + len(wrap_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * tc.dims["NMK".index(x[-1])] for x in wrap_layout)
-            strides[tcd : tcd + len(tcd_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * tc.dims["NMK".index(x[-1])] for x in tcd_layout)
-            [occurrences[v].append(i) for i, v in enumerate(st.real_strides())]
-            return ShapeTracker.from_shape(st.shape).permute(tuple(occurrences[v].pop(0) for v in strides))
-          #incorre (10, 4, 3, 2, 1, 5, 6, 7, 8, 9, 0, 11)
-          #correct (0, 1, 11, 2, 3, 5, 6, 7, 8, 9, 4, 10)
+          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout, shape):
+            wd, tcd, strides, real_strides = self.global_dims, self.first_upcast, list(st.real_strides()), list(st.real_strides())
+            strides[wd : wd + len(wrap_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * shape["MNK".index(x[-1])] for x in wrap_layout)
+            strides[tcd : tcd + len(tcd_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * shape["MNK".index(x[-1])] for x in tcd_layout)
+            permaxis = list(range(len(st.shape)))
+            for i in range(len(st.shape)):
+              if not (wd <= i < wd + len(wrap_layout) or tcd <= i < tcd + len(tcd_layout)) or strides[i] == real_strides[i]: continue
+              index = real_strides.index(strides[i], i)
+              real_strides[i], real_strides[index] = real_strides[index], real_strides[i]
+              permaxis[i], permaxis[index] = permaxis[index], permaxis[i]
+            return ShapeTracker.from_shape(st.shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
             st = srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg
-            if tc.layout[i]: srcs[i] = srcs[i].view(fix_st_layout(st, *tc.layout[i]))
+            if tc_pattern: fix_st(st, *tc_pattern)
+            if tc.layout[i]: srcs[i] = srcs[i].view(fix_st_layout(st, *tc.layout[i], op.full_shape))
             # elif tc_pattern: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
@@ -694,10 +684,9 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
-          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
-          if self.use_tensor_cores == 1 and tc.layout[2]: ret = ret.view(fix_st_layout(self.sts[0], *tc.layout[2]))
-          return ret
+          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          # fix_st(self.sts[0], *tc.st3_pattern)
+          return ret.view(fix_st_layout(self.sts[0], *tc.layout[2], op.full_shape)) if self.use_tensor_cores == 1 and tc.layout[2] else ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
