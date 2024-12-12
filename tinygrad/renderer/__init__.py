@@ -1,5 +1,5 @@
 from typing import Optional, List, Tuple, Dict, Callable, Any
-import functools
+import functools, math
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
@@ -20,6 +20,9 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   st2_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
   st3_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for C/D
   layout: Any = None
+  def get_reduce_axes(self, offset = 0): return tuple((i + offset, 2) for i in range(int(math.log2(self.dims[2]))))
+  # def get_upcast_axes(self, offset = 0): return tuple(tuple((i + offset, 2) for i, value in enumerate(l[1]) if value != 0) for l in self.layout)
+  def get_upcast_axes(self, index, offset = 0): return tuple((i + offset, 2) for i, value in enumerate(self.layout[index][1]) if value != 0)
   expanded_shape: Optional[Tuple[int, ...]] = None
   opts_seq: Tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims))) # + [self.dtype_in.name, self.dtype_out.name])

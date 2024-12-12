@@ -624,7 +624,9 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
+            print(st)
             st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
+            print(st)
             # wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             wd = self.global_dims
             # tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
@@ -635,11 +637,13 @@ class Kernel:
 
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(wd_pattern),tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))
-            print("permaxis", tuple(permaxis))
             # return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
-            return st.permute(tuple(permaxis))
+            permuted = st.permute(tuple(permaxis))
+            print(permuted)
+            print("permaxis", tuple(permaxis))
+            return permuted
 
-          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout):
+          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout, reduce = False):
             # solution 1
             # cont_st = ShapeTracker.from_shape(st.shape)
             # wd, tcd = self.global_dims, self.first_upcast
@@ -653,17 +657,20 @@ class Kernel:
             # fixed = [next(zeors) if x == -1 else x for x in permaxis]
             # return cont_st.permute(tuple(fixed))
             # solution 2
+            # print(st)
             wd, tcd, strides, occurrences = self.global_dims, self.first_upcast, list(st.real_strides()), defaultdict(list)
             strides[wd : wd + len(wrap_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * tc.dims["NMK".index(x[-1])] for x in wrap_layout)
             strides[tcd : tcd + len(tcd_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * tc.dims["NMK".index(x[-1])] for x in tcd_layout)
             [occurrences[v].append(i) for i, v in enumerate(st.real_strides())]
             return ShapeTracker.from_shape(st.shape).permute(tuple(occurrences[v].pop(0) for v in strides))
+          #incorre (10, 4, 3, 2, 1, 5, 6, 7, 8, 9, 0, 11)
+          #correct (0, 1, 11, 2, 3, 5, 6, 7, 8, 9, 4, 10)
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
             st = srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg
-            if tc.layout[i] is not None: srcs[i] = srcs[i].view(fix_st_layout(st, *tc.layout[i]))
-            elif tc_pattern: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
+            if tc.layout[i]: srcs[i] = srcs[i].view(fix_st_layout(st, *tc.layout[i]))
+            # elif tc_pattern: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -679,8 +686,8 @@ class Kernel:
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
             wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=tc.get_upcast_axes(0, self.first_upcast)),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=tc.get_upcast_axes(1, self.first_upcast)),
               UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
             tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
@@ -689,6 +696,7 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
+          # if self.use_tensor_cores == 1 and tc.layout[2]: ret = ret.view(fix_st_layout(unwrap(ret.st), *tc.layout[2], True))
           if self.use_tensor_cores == 1 and tc.st3_pattern: ret = ret.view(fix_st(unwrap(ret.st), *tc.st3_pattern))
           return ret
 
