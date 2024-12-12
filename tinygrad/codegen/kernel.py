@@ -645,7 +645,7 @@ class Kernel:
             # wd, tcd = self.global_dims, self.first_upcast
             # wrap_layout=list(x if isinstance(x, int) else int(x[:-1])*tc.dims["NMK".index(x[-1])] for x in layout[0])
             # tcds_layout=list(x if isinstance(x, int) else int(x[:-1])*tc.dims["NMK".index(x[-1])] for x in layout[1])
-            # masked_strides = list(s if (i>=wd and i<wd+len(wrap_layout)) or (i>=tcd and i<tcd+len(tcds_layout)) else -1 for i,s in enumerate(st.real_strides()))
+            # masked_strides = list(s if (i>=wd and i<wd+len(wrap_layout)) or (i>=tcd and i<tcd+len(tcds_layout)) else -1 for i,s in enumerate(st.real_strides())) # noqa:E501
             # perm_1 = list(masked_strides.index(i) if i != 0 else -1 for i in wrap_layout)
             # perm_2 = list(masked_strides.index(i) if i != 0 else -1 for i in tcds_layout)
             # permaxis = list(range(wd)) + perm_1 + list(range(wd+len(wrap_layout),tcd)) + perm_2 + list(range(tcd+len(tcds_layout),len(st.shape)))
