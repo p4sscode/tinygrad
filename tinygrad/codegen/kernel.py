@@ -643,7 +643,7 @@ class Kernel:
             print("permaxis", tuple(permaxis))
             return permuted
 
-          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout, reduce = False):
+          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout):
             # solution 1
             # cont_st = ShapeTracker.from_shape(st.shape)
             # wd, tcd = self.global_dims, self.first_upcast
@@ -696,8 +696,7 @@ class Kernel:
 
           new_reduce_axes = tuple(i for i in axes if i not in tc_reduce_axes)
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
-          # if self.use_tensor_cores == 1 and tc.layout[2]: ret = ret.view(fix_st_layout(unwrap(ret.st), *tc.layout[2], True))
-          if self.use_tensor_cores == 1 and tc.st3_pattern: ret = ret.view(fix_st(unwrap(ret.st), *tc.st3_pattern))
+          if self.use_tensor_cores == 1 and tc.layout[2]: ret = ret.view(fix_st_layout(self.sts[0], *tc.layout[2]))
           return ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
