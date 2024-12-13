@@ -643,7 +643,7 @@ class Kernel:
             print("Correct permaxis", tuple(permaxis))
             return permuted
 
-          def fix_st_layout(st: ShapeTracker, wrap_layout, tcd_layout, shape):
+          def fix_layout(st: ShapeTracker, wrap_layout, tcd_layout, shape):
             wd, tcd, strides, real_strides = self.global_dims, self.first_upcast, list(st.real_strides()), list(st.real_strides())
             strides[wd : wd + len(wrap_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * shape["MNK".index(x[-1])] for x in wrap_layout)
             strides[tcd : tcd + len(tcd_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * shape["MNK".index(x[-1])] for x in tcd_layout)
@@ -657,10 +657,7 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            st = srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg
-            if tc_pattern: fix_st(st, *tc_pattern)
-            if tc.layout[i]: srcs[i] = srcs[i].view(fix_st_layout(st, *tc.layout[i], op.full_shape))
-            # elif tc_pattern: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
+            if tc.layout[i]: srcs[i] = srcs[i].view(fix_layout(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc.layout[i], op.full_shape))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -686,7 +683,7 @@ class Kernel:
 
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
           # fix_st(self.sts[0], *tc.st3_pattern)
-          return ret.view(fix_st_layout(self.sts[0], *tc.layout[2], op.full_shape)) if self.use_tensor_cores == 1 and tc.layout[2] else ret
+          return ret.view(fix_layout(self.sts[0], *tc.layout[2], op.full_shape)) if self.use_tensor_cores == 1 and tc.layout[2] else ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
