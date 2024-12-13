@@ -315,7 +315,7 @@ class Kernel:
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
+        for tc_dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
         for opt in tc.opts_seq:
           if opt == "UP":
             for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False)
@@ -623,26 +623,6 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            # print(st)
-            st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
-            # print(st)
-            # wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
-            wd = self.global_dims
-            # tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
-            tcd = self.first_upcast
-
-            # assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-            # assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(wd_pattern),tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tcd_pattern),len(st.shape)))
-            # return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
-            permuted = st.permute(tuple(permaxis))
-            # print(permuted)
-            print("Correct permaxis", tuple(permaxis))
-            return permuted
-
           def fix_layout(st: ShapeTracker, wrap_layout, tcd_layout, shape):
             wd, tcd, strides, real_strides = self.global_dims, self.first_upcast, list(st.real_strides()), list(st.real_strides())
             strides[wd : wd + len(wrap_layout)] = list(x if isinstance(x, int) else int(x[:-1]) * shape["MNK".index(x[-1])] for x in wrap_layout)
@@ -661,28 +641,26 @@ class Kernel:
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
-              st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
-              if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
-              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
+              st_uop = ShapeTracker.from_shape(local_shape).to_uop()
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st_uop.arg.real_size()))
+              local_store = UOp.store(local_buffer, st_uop, srcs[i])
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
-          tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
+          tc_reduce_axes = tuple(ax for ax, _ in tc.get_reduce_axes(self.first_upcast))
+          tc_upcast_axes = tuple(tuple((ax, sz) for ax, sz in up) for up in tc.get_upcast_axes(self.first_upcast))
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
-            upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
-            wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), tc_upcast_axes, tc_reduce_axes)
+            wmma_sz = [prod(x[1] for x in l) for l in tc_upcast_axes]
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=tc.get_upcast_axes(0, self.first_upcast)),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=tc.get_upcast_axes(1, self.first_upcast)),
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
               UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-            tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
+            tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
-          # fix_st(self.sts[0], *tc.st3_pattern)
           return ret.view(fix_layout(self.sts[0], *tc.layout[2], op.full_shape)) if self.use_tensor_cores == 1 and tc.layout[2] else ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
