@@ -9,7 +9,7 @@ from tinygrad.dtype import DType
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
-  upcast_size: tuple[int, int, int]
+  upcast_size: tuple[int, int, int] # A, B, C/D
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifing kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
