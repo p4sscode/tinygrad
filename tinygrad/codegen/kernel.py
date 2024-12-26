@@ -307,8 +307,13 @@ class Kernel:
         except KernelOptError: continue
         # tensor core -- unroll the reduce dim, upcast input and local the thread pattern
         for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
-        for dim, amt in tc.get_upcast_axes(): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
-        for dim, amt in tc.get_local_axes(): self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
+        if tc.opts:
+          for opt, dim in tc.opts:
+            if opt == "u": self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],2), append_opt=False)
+            if opt == "l": self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],2), append_opt=False)
+        else:
+          for dim, amt in tc.get_upcast_axes(): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
+          for dim, amt in tc.get_local_axes(): self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
