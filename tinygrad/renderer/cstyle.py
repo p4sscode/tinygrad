@@ -174,9 +174,9 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) + \
     CStyleLanguage.extra_matcher
 
-  if AMX: tensor_cores = [TensorCore(dims=(sz,sz,1), upcast_size=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
-            swizzle=(None, ((),(4,5,6,7,0,1,2,3))), opts=(("u",0),("u",0),("u",0),("u",0),("u",1),("u",1),("u",1),("u",1)))
-            for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
+  if AMX:
+    tensor_cores = [TensorCore(dims=(sz,sz,1), upcast_size=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt, swizzle=(None, ((),(4,5,6,7,0,1,2,3))),
+      opts=(("u",0),("u",0),("u",0),("u",0),("u",1),("u",1),("u",1),("u",1))) for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -366,8 +366,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), upcast_size=(16,16,8), dtype_in=dti, dtype_out=dto,
     swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))),
-    opts=(("l",0),("l",0),("l",0),("l",0),("l",1),("u",1),("u",1),("u",1)))
-    for dti,dto in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
+    opts=(("l",0),("l",0),("l",0),("l",0),("l",1),("u",1),("u",1),("u",1))) for dti,dto in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
