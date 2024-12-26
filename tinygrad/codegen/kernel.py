@@ -10,7 +10,7 @@ from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, typ
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
@@ -307,13 +307,7 @@ class Kernel:
         except KernelOptError: continue
         # tensor core -- unroll the reduce dim, upcast input and local the thread pattern
         for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
-        if tc.opts:
-          for opt, dim in tc.opts:
-            if opt == "u": self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],2), append_opt=False)
-            if opt == "l": self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],2), append_opt=False)
-        else:
-          for dim, amt in tc.get_upcast_axes(): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
-          for dim, amt in tc.get_local_axes(): self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
+        for opt in tc.opts: self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]],tc_opts.axes[opt[1]],2), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -624,7 +618,7 @@ class Kernel:
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
             tc_upcast_axes= (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, (2**len(tc.get_local_axes())), tc_upcast_axes, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.upcast_size[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.upcast_size[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.upcast_size[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),

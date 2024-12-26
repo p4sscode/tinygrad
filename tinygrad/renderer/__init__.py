@@ -9,20 +9,16 @@ from tinygrad.dtype import DType
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
-  threads: int # number of threads that construct the warp
   upcast_size: tuple[int, int, int]
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  opts: Optional[tuple[tuple[str, int], ...]] = None
-  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
+  opts: tuple[tuple[str, int], ...]
+  # swizzle patterns to fix shapetrackers
+  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
-  def get_upcast_axes(self):
-    tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
-    return tcd_axes[int(math.log2(self.threads)):]
-  def get_local_axes(self):
-    tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
-    return tcd_axes[:int(math.log2(self.threads))]
+  def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
+  def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
 
 @dataclass(frozen=True)
 class Estimates:
