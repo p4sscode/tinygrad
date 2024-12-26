@@ -634,8 +634,7 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
-          return ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.swizzle[2])) if self.use_tensor_cores == 1 and tc.swizzle[2] else ret
+          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
