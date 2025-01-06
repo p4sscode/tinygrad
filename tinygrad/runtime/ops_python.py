@@ -146,19 +146,19 @@ class PythonProgram:
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # (i, j), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8 
+            # (i, j), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
-            if arg[1] = (8,16,16):
+            if arg[1] == (8,16,16):
               def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (8 elements on 32 threads)
               def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (4 elements on 32 threads)
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
-            elif arg[1] = (8,16,8) and arg[2] = dtypes.half:
+            elif arg[1] == (8,16,8) and arg[2] == dtypes.half:
               def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
               def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
-            elif arg[1] = (8,16,8) and arg[2] = dtypes.float:
+            elif arg[1] == (8,16,8) and arg[2] == dtypes.float:
               def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
               def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
