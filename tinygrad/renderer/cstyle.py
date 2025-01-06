@@ -299,11 +299,15 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
   tc_81616 = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di,dtype_out=do, opts=("u0","l0","l0","l1","l1","l1","u1"),
-    swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)),((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
-  tc_8168 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=di, dtype_out=do, opts=("u0","l0","l0","l1","l1","l1","u1"),
-    swizzle=swizzle) for (di,do), swizzle in zip([(dtypes.float,dtypes.float), (dtypes.half,dtypes.float)],
-    [(((5,6,2,3,4),(0,1,8,9,7)),((5,6,8,0,1),(2,3,4,9,7))), (((6,7,2,3,4),(0,1,8,5,9)),((6,7,8,0,1),(2,3,4,9,5)))])]
-  tc_sm80, tc_sm75 = tc_81616 + tc_8168, [tc for tc in tc_8168 if tc.dtype_in == dtypes.half]
+    swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
+
+  tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float,
+    opts=("u0","l0","l0","l1","l1","l1","u1"), swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
+  tc_8168_tf32 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.float, dtype_out=dtypes.float,
+    opts=("u0","l0","l0","l1","l1","l1","u1"), swizzle=(((5,6,2,3,4),(0,1,8,9,7)), ((5,6,8,0,1),(2,3,4,9,7))))]
+
+  tc_sm80 = tc_81616 + tc_8168_f16 + tc_8168_tf32
+  tc_sm75 = tc_8168_f16
   def __init__(self, arch:str):
     self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
