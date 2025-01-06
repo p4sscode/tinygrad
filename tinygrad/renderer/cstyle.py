@@ -291,7 +291,7 @@ class MetalRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 _nms = "xyzwabcdefghijkl"
-cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all M=16 N=8 cuda tc shapes
+cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all tc shapes with M=16 N=8 
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
