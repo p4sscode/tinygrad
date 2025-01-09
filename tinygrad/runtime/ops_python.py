@@ -152,7 +152,7 @@ class PythonProgram:
             if arg[1] == (8,16,16):
               def a_elem(a, k, row, _):
                 print(f"k {k}, row {row}")
-                return a[k % 2 + 2 * (row // 8) + (k % 8) * 4][0]
+                return a[k % 2 + 2 * (row // 8) + (k % 8) * 4][(k // 2) % 4 + (row * 4) % 32]
               def b_elem(b, col, k, _):
                 print(f"col {col}, k {k}")
                 return b[0][0]
