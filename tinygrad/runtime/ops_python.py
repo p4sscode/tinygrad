@@ -151,19 +151,44 @@ class PythonProgram:
 
             if arg[1] == (8,16,16):
               def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8) + (k // 8) * 4][goff + (k // 2) % 4 + (row % 8) * 4]
-                # print(f"k {k}, row {row}")
-                # print(f"a elem {k % 2 + 2 * (row // 8) + (k % 8) * 4}, thread {goff + (k // 2) % 4 + (row % 8) * 4}")
-                # return a[k % 2 + 2 * (row // 8) + (k // 8) * 4][goff + (k // 2) % 4 + (row % 8) * 4]
               def b_elem(b, col, k, goff): return b[k % 2 + (k // 8) * 2][goff + (k // 2) % 4 + col * 4]
-                # print(f"col {col}, k {k}")
-                # print(f"b elem {k % 2 + (k // 8) * 2}, thread {goff + (k // 2) % 4 + col * 4}")
-                # return b[k % 2 + (k // 8) * 2][goff + (k // 2) % 4 + col * 4]
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
             if arg[1] == (8,16,8):
               def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8)][goff + k // 2 + (row % 8) * 4]
               def b_elem(b, col, k, goff): return b[k % 2][goff + k // 2 + col * 4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+            if arg[1] == (8,16,8):
+              def a_elem(a, k, row, goff):
+                print(f"k {k}, row {row}")
+                print(f"a elem {(k // 4) * 2 + row // 8}, thread {goff + k % 4 + (row % 8) * 4}")
+                return a[(k // 4) * 2 + row // 8][goff + k % 4 + (row % 8) * 4]
+              def b_elem(b, col, k, goff):
+                print(f"col {col}, k {k}")
+                print(f"b elem {0}, thread {0}")
+                return b[k // 4][goff + k % 4 + (col % 8) * 4]
+              ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             # # a [elem] [lane] => [#4][#32]
             # def a_elem(a, k, row, _):
             #   print(f"k {k}, row {row}")
