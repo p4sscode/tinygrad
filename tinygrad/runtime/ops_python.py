@@ -125,8 +125,8 @@ class PythonProgram:
             for goff in range(0, warp_size, WARP_THREADS):
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
-                  (c_i, c_j) = c_map(lane_id, elem_idx)
-                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
+                  (col, row) = c_map(lane_id, elem_idx)
+                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, row, goff) * b_elem(inp[1], col, _k, goff) for _k in range(K))
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
@@ -146,29 +146,36 @@ class PythonProgram:
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # (c_i, c_j) (col, row), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8
+            # (col, row) given (lane, elem) for C & D (4 elements on 32 threads); shared by all tc shapes with M=16 N=8
             def c_map(lane, elem): return ((lane % 4) * 2 + elem % 2, lane // 4 + (elem // 2) * 8)
 
             if arg[1] == (8,16,16):
-              def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8) + (k // 8) * 4][goff + (k // 2) % 4 + (row % 8) * 4]
-              def b_elem(b, col, k, goff): return b[k % 2 + (k // 8) * 2][goff + (k // 2) % 4 + col * 4]
+              def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8) + (k // 8) * 4][goff + (k // 2) % 4 + (row % 8) * 4] # A (8 elements on 32 threads)
+              def b_elem(b, col, k, goff): return b[k % 2 + (k // 8) * 2][goff + (k // 2) % 4 + col * 4] # B (4 elements on 32 threads)
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
-            if arg[1] == (8,16,8):
-              def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8)][goff + k // 2 + (row % 8) * 4]
-              def b_elem(b, col, k, goff): return b[k % 2][goff + k // 2 + col * 4]
+            elif arg[1] == (8,16,8) and arg[2] == dtypes.half:
+              def a_elem(a, k, row, goff): return a[k % 2 + 2 * (row // 8)][goff + k // 2 + (row % 8) * 4] # A (4 elements on 32 threads)
+              def b_elem(b, col, k, goff): return b[k % 2][goff + k // 2 + col * 4] # B (2 elements on 32 threads)
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
-            if arg[1] == (8,16,8):
-              def a_elem(a, k, row, goff):
-                print(f"k {k}, row {row}")
-                print(f"a elem {(k // 4) * 2 + row // 8}, thread {goff + k % 4 + (row % 8) * 4}")
-                return a[(k // 4) * 2 + row // 8][goff + k % 4 + (row % 8) * 4]
-              def b_elem(b, col, k, goff):
-                print(f"col {col}, k {k}")
-                print(f"b elem {0}, thread {0}")
-                return b[k // 4][goff + k % 4 + (col % 8) * 4]
+            elif arg[1] == (8,16,8) and arg[2] == dtypes.float:
+              def a_elem(a, k, row, goff): return a[(k // 4) * 2 + row // 8][goff + k % 4 + (row % 8) * 4] # A (4 elements on 32 threads)
+              def b_elem(b, col, k, goff): return b[k // 4][goff + k % 4 + (col % 8) * 4] # B (2 elements on 32 threads)
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+            else: raise NotImplementedError(f"unimplemented tensor core {arg}")
+
+
+
+
+
+                # print(f"k {k}, row {row}")
+                # print(f"a elem {(k // 4) * 2 + row // 8}, thread {goff + k % 4 + (row % 8) * 4}")
+                # return a[(k // 4) * 2 + row // 8][goff + k % 4 + (row % 8) * 4]
+                # print(f"col {col}, k {k}")
+                # print(f"b elem {0}, thread {0}")
+                # return b[k // 4][goff + k % 4 + (col % 8) * 4]
 
 
 
