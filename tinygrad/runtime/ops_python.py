@@ -146,24 +146,73 @@ class PythonProgram:
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # (i, j), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8
-            def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
+            # (c_i, c_j) (col, row), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8
+            def c_map(lane, elem): return ((lane % 4) * 2 + elem % 2, lane // 4 + (elem // 2) * 8)
+
             if arg[1] == (8,16,16):
-              def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (8 elements on 32 threads)
-              def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (4 elements on 32 threads)
-              ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+              def a_elem(a, k, row, _):
+                print(f"k {k}, row {row}")
+                return a[k % 2 + 2 * (row // 8) + (k % 8) * 4][0]
+              def b_elem(b, col, k, _):
+                print(f"col {col}, k {k}")
+                return b[0][0]
 
-            elif arg[1] == (8,16,8) and arg[2] == dtypes.half:
-              def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
-              def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
+            if arg[1] == (8,16,8):
+              def a_elem(a, k, row, _): return a[k % 2 + 2 * (row // 8)][k // 2 + (row * 4) % 32]
+              def b_elem(b, col, k, _): return b[k % 2][k // 2 + col * 4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+            # # a [elem] [lane] => [#4][#32]
+            # def a_elem(a, k, row, _):
+            #   print(f"k {k}, row {row}")
+            #   print(f"a elem {k % 2 + 2 * (row // 8)}, thread {k // 2 + row * 4}")
+            #   return a[k % 2 + 2 * (row // 8)][k // 2 + (row * 4) % 32]
 
-            elif arg[1] == (8,16,8) and arg[2] == dtypes.float:
-              def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
-              def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
-              ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+            # # b [elem] [lane] => [#2][#32]
+            # def b_elem(b, col, k, _):
+            #   print(f"col {col}, k {k}")
+            #   print(f"b elem {k % 2}, thread {k // 2 + col * 4}")
+            #   return b[k % 2][k // 2 + col * 4]
 
-            else: raise NotImplementedError(f"unimplemented tensor core {arg}")
+            # #wmma_helper(threads, k, *elements_per_threads(A,B,C), a_elem, b_elem, c_map)
+            # ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            # # (i, j), C, D (4 elements on 32 threads) shared by all tc shapes with M=16 N=8
+            # def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
+            # if arg[1] == (8,16,16):
+            #   def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (8 elements on 32 threads)
+            #   def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (4 elements on 32 threads)
+            #   ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+
+            # elif arg[1] == (8,16,8) and arg[2] == dtypes.half:
+            #   def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
+            #   def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
+            #   ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+            # elif arg[1] == (8,16,8) and arg[2] == dtypes.float:
+            #   def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4] # A (4 elements on 32 threads)
+            #   def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4] # B (2 elements on 32 threads)
+            #   ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+            # else: raise NotImplementedError(f"unimplemented tensor core {arg}")
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
             def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
@@ -190,7 +239,7 @@ class PythonRenderer(Renderer):
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
-    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
+    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
