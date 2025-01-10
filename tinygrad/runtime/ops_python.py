@@ -125,8 +125,8 @@ class PythonProgram:
             for goff in range(0, warp_size, WARP_THREADS):
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
-                  (col, row) = c_map(lane_id, elem_idx)
-                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, row, goff) * b_elem(inp[1], col, _k, goff) for _k in range(K))
+                  (c_i, c_j) = c_map(lane_id, elem_idx)
+                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
