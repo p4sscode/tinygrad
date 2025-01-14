@@ -160,8 +160,8 @@ class PythonProgram:
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
             elif arg[1] == (8,16,8) and arg[2] == dtypes.float:
-              def a_elem(x, k, row, goff): return x[(k//4)*2 + row//8][goff + k%4 + row//4]
-              def b_elem(x, col, k, goff): return x[k//4][goff + k%4 + col//4]
+              def a_elem(x, k, row, goff): return x[(k//4)*2 + row//8][goff + k%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k//4][goff + k%4 + col*4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
             else: raise NotImplementedError(f"unimplemented tensor core {arg}")
