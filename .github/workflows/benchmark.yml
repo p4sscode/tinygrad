@@ -173,7 +173,7 @@ jobs:
     - name: Test tensor cores
       run: |
         NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
-        PTX=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+        PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -227,6 +227,7 @@ jobs:
           torch_speed.txt
           matmul.txt
           matmul_bfloat16.txt
+          matmul_tf32.txt
           matmul_ptx.txt
           matmul_nv.txt
           sd.txt
