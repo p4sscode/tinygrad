@@ -299,12 +299,14 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
+  tc_81632 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di,dtype_out=do, opts=cuda_tc_opts,
+    ) for di,do in [(dtypes.int8,dtypes.int32)]]
   tc_81616 = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di,dtype_out=do, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
 
-  tc_sm80 = tc_81616 + tc_8168_f16
+  tc_sm80 = tc_81632 + tc_81616 + tc_8168_f16
   tc_sm75 = tc_8168_f16
   def __init__(self, arch:str):
     self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
@@ -324,7 +326,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.int8:"int8_t", dtypes.uint8: "uint8_t"}
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -338,9 +340,12 @@ class CUDARenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
+    if any(dt.scalar() == dtypes.int8 for dt in used_dtypes): prefix.append("typedef signed char int8_t;")
+    if any(dt.scalar() == dtypes.uint8 for dt in used_dtypes): prefix.append("typedef unsigned char uint8_t;")
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 4 and dt.scalar() in {dtypes.half, dtypes.bfloat16, dtypes.int8, dtypes.int32}]
 
-    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.int8: "s8" }
+    dt_map_out = { dtypes.int32: "s32", dtypes.float: "f32" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
@@ -349,10 +354,11 @@ class CUDARenderer(CStyleLanguage):
 
       # mma operands => {c}, {a}, {b}, {c}
       prefix.append(f"""__device__ {wmma_dtypes[2]} __{name}({wmma_dtypes[0]} a, {wmma_dtypes[1]} b, {wmma_dtypes[2]} c){{
-  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32"
+  int *a_pk = (int *)(&a), *b_pk = (int *)(&b), *c_pk = (int *)(&c);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}"
       "{{{", ".join(operands[:n_operands[2]])}}}, {{{", ".join(operands[n_operands[2]:n_operands[2]+n_operands[0]])}}},"
       "{{{", ".join(operands[-n_operands[1]:])}}}, {{{", ".join(operands[:n_operands[2]])}}};"
-    : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(n_operands[2])])}
+    : {", ".join([f'"+r"(c_pk[{i}])' for i in range(n_operands[2])])}
     : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_operands[1])])});
   return c;\n}}""")
 
