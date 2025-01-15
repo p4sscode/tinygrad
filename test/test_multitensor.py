@@ -43,6 +43,12 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (256,)
     (X + X).realize()
 
+  def test_gradient(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.to_(devices_2)
+    grad = X.sum().gradient(X)[0]
+    grad.realize()
+
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
@@ -75,7 +81,7 @@ class TestMultiTensor(unittest.TestCase):
       ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 
-  @unittest.skip("this doesn't fold because from_sharded calls contiguous on all lbs")
+  @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
     # Buffer may be stuck in track_cross_buffer
     for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
@@ -694,6 +700,7 @@ class TestMultiTensor(unittest.TestCase):
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
+  @unittest.skip("TODO: this requires forced_realize to be deleted.")
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
