@@ -18,7 +18,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
-  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)))
+  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [s.replace(" ", "_") for s in [self.dtype_in.name, self.dtype_out.name]])
   def __post_init__(self):
     local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
     assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), (
