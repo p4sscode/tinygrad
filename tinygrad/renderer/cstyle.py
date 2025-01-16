@@ -300,7 +300,7 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
   tc_81632 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di,dtype_out=do, opts=cuda_tc_opts,
-    swizzle=(((7,8,2,3,4),(0,10,1,5,6,11,9)), ((7,8,10,0,1),(2,3,4,11,5,6,9)))) for di,do in [(dtypes.int8,dtypes.int32)]]
+    swizzle=(((7,8,2,3,4),(0,10,1,5,6,11,9)), ((7,8,10,0,1),(2,3,4,11,5,6,9)))) for di,do in [(dtypes.int8,dtypes.int32),(dtypes.uint8,dtypes.int32)]]
   tc_81616 = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di,dtype_out=do, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
