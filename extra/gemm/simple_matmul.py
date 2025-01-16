@@ -26,7 +26,7 @@ if __name__ == "__main__":
   with Context(DEBUG=0):a, b = init_matrix(M, K), init_matrix(K, N)
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
-        a, b = init_matrix(M, K), init_matrix(K, N)
+      a, b = init_matrix(M, K), init_matrix(K, N)
     c = a.matmul(b, acc_dtype=acc_dtype).realize()
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     np.testing.assert_allclose(res, ref, rtol=RTOL, atol=ATOL)
   except AssertionError as e:
     if getenv("DEBUG_VALUES", 0) > 0:
-      mismatch = np.where(~np.isclose(res, ref, rtol=RTOL, atol=ATOL))
+      mismatch = np.where(~np.isclose(res, ref, rtol=RTOL, atol=ATOL)) 
       print("Mismatch indices:", mismatch)
       print("Result      :", res[mismatch])
       print("Ground truth:", ref[mismatch])
