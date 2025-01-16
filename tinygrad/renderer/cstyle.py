@@ -337,14 +337,12 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
-    used_dtypes = uops_to_dtypes(uops)
-    if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
-    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    if any(dt.scalar() == dtypes.int8 for dt in used_dtypes): prefix.append("typedef signed char int8_t;")
-    if any(dt.scalar() == dtypes.uint8 for dt in used_dtypes): prefix.append("typedef unsigned char uint8_t;")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 4 and dt.scalar() in {dtypes.half, dtypes.bfloat16, dtypes.int8, dtypes.int32}]
+    used_dts = uops_to_dtypes(uops)
+    if any(dt.scalar() in (dtypes.half,dtypes.bfloat16) for dt in used_dts): prefix+=["#include <cuda_fp16.h>\n#include <cuda_bf16.h>"]
+    if any(dt.scalar() in (dtypes.int8,dtypes.uint8) for dt in used_dts): prefix+=["typedef signed char int8_t;\ntypedef unsigned char uint8_t;"]
+    prefix+=[self.render_vector_prefix(dt) for dt in used_dts if dt.count>4 and dt.scalar() in (dtypes.half,dtypes.bfloat16,dtypes.int8,dtypes.int32)]
 
-    dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.int8: "s8" }
+    dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.int8: "s8", dtypes.uint8: "u8" }
     dt_map_out = { dtypes.int32: "s32", dtypes.float: "f32" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
