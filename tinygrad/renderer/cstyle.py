@@ -338,9 +338,10 @@ class CUDARenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     used_dts = uops_to_dtypes(uops)
-    if any(dt.scalar() in (dtypes.half,dtypes.bfloat16) for dt in used_dts): prefix+=["#include <cuda_fp16.h>\n#include <cuda_bf16.h>"]
-    if any(dt.scalar() in (dtypes.int8,dtypes.uint8) for dt in used_dts): prefix+=["typedef signed char int8_t;\ntypedef unsigned char uint8_t;"]
-    prefix+=[self.render_vector_prefix(dt) for dt in used_dts if dt.count>4 and dt.scalar() in (dtypes.half,dtypes.bfloat16,dtypes.int8,dtypes.int32)]
+    if any(dt.scalar() in (dtypes.half, dtypes.bfloat16) for dt in used_dts): prefix += ["#include <cuda_fp16.h>\n#include <cuda_bf16.h>"]
+    if any(dt.scalar() in (dtypes.int8, dtypes.uint8) for dt in used_dts): prefix += ["typedef signed char int8_t;\ntypedef unsigned char uint8_t;"]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dts if dt.count > 4 and dt.scalar() in (dtypes.half, dtypes.bfloat16)]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dts if dt.count > 1 and dt.scalar() in (dtypes.int8, dtypes.uint8)]
 
     dt_map_in = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.int8: "s8", dtypes.uint8: "u8" }
     dt_map_out = { dtypes.int32: "s32", dtypes.float: "f32" }
