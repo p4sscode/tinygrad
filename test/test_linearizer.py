@@ -25,8 +25,13 @@ def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
   return s[-1].ast, bufs
 
+def init_matrix(rows, cols, dtype_in):
+  if dtype_in in dtypes.ints:
+    return Tensor.randint((rows, cols), dtype=dtype_in).realize()
+  return Tensor.rand(rows, cols, dtype=dtype_in).realize()
+
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+  a, b = init_matrix(m, k, dtype_in), init_matrix(k, n, dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, acc_dtype=dtype_out)
   sched = r.schedule()
@@ -45,7 +50,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
 def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0, ensure_triggered:bool=True):
-  a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
+  a, b = init_matrix(m, k, dtype_in), init_matrix(k, n, dtype_in)
   r = a.matmul(b, acc_dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
