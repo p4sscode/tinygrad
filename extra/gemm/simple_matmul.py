@@ -2,21 +2,21 @@ import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
 
+dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
+acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
+if getenv("INT"):
+  dtype_in, acc_dtype = dtypes.int8, dtypes.int32
+if getenv("UINT"):
+  dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
+
+N = getenv("N", 4096)
+M = getenv("M", N)
+K = getenv("K", N)
+CNT = getenv("CNT", 10)
+ATOL = getenv("ATOL", 1e-4)
+RTOL = getenv("RTOL", 3e-2)
+
 if __name__ == "__main__":
-  dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
-  acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
-  if getenv("INT"):
-    dtype_in, acc_dtype = dtypes.int8, dtypes.int32
-  if getenv("UINT"):
-    dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
-
-  N = getenv("N", 4096)
-  M = getenv("M", N)
-  K = getenv("K", N)
-  CNT = getenv("CNT", 10)
-  ATOL = getenv("ATOL", 1e-4)
-  RTOL = getenv("RTOL", 3e-2)
-
   def init_matrix(rows, cols):
     if dtype_in in dtypes.ints:
       return Tensor.randint((rows, cols), dtype=dtype_in).realize()
