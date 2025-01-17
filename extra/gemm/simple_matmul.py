@@ -1,5 +1,5 @@
 import numpy as np
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
 
 if __name__ == "__main__":
@@ -23,7 +23,7 @@ if __name__ == "__main__":
       return Tensor.randint((rows, cols), dtype=dtype_in).realize()
     return Tensor.rand(rows, cols, dtype=dtype_in).realize()
 
-  with Context(DEBUG=0):a, b = init_matrix(M, K), init_matrix(K, N)
+  a, b = init_matrix(M, K), init_matrix(K, N)
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = init_matrix(M, K), init_matrix(K, N)
