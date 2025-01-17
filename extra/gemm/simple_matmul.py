@@ -3,13 +3,12 @@ from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
 
 if __name__ == "__main__":
-  dtype_in = (dtypes.half if getenv("HALF") else
-              dtypes.bfloat16 if getenv("BFLOAT16") else
-              dtypes.float)
-  acc_dtype = (dtypes.half if getenv("ACC_HALF") else
-               dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None)
-  if getenv("INT"):  dtype_in, acc_dtype = dtypes.int8, dtypes.int32
-  if getenv("UINT"): dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
+  dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
+  acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
+  if getenv("INT"):
+    dtype_in, acc_dtype = dtypes.int8, dtypes.int32
+  if getenv("UINT"):
+    dtype_in, acc_dtype = dtypes.uint8, dtypes.int32
 
   N = getenv("N", 4096)
   M = getenv("M", N)
