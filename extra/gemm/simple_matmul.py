@@ -35,7 +35,7 @@ if __name__ == "__main__":
     np.testing.assert_allclose(res, ref, rtol=RTOL, atol=ATOL)
   except AssertionError as e:
     if getenv("DEBUG_VALUES", 0) > 0:
-      mismatch = np.where(~np.isclose(res, ref, rtol=RTOL, atol=ATOL)) 
+      mismatch = np.where(~np.isclose(res, ref, rtol=RTOL, atol=ATOL))
       print("Mismatch indices:", mismatch)
       print("Result      :", res[mismatch])
       print("Ground truth:", ref[mismatch])
