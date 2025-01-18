@@ -64,14 +64,14 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
   dt_map_in, dt_map_out  = { dtypes.float: "tf32", dtypes.half: "f16" }, { dtypes.float: "f32", dtypes.half: "f16" }
   _i = offset = x.dtype.itemsize//4
 
-  for vv in x.src:
-    for i in range(0, len(ctx.r[vv]), (elems_per_reg := 4//dtype_in.itemsize)):
+  for i, vv in enumerate(x.src):
+    for i in range(0, len(ctx.r[vv]), (elems_per_reg := 4//(dtype_in if i < 2 else dtype_out).itemsize)):
       yield f"mov.b32 {ctx.wmma_r[_i]}, " + (f"{{{', '.join(ctx.r[vv][i:i+elems_per_reg])}}}" if elems_per_reg > 1 else ctx.r[vv][i]) + ";"
       _i += 1
 
   yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'+\
   f'{{{", ".join(ctx.wmma_r[:offset])}}}, {{{", ".join(ctx.wmma_r[offset:n_operands[0]+offset])}}}, '+\
-  f'{{{", ".join(ctx.wmma_r[offset+n_operands[0]:-n_operands[2]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[2]:])}}};'
+  f'{{{", ".join(ctx.wmma_r[n_operands[0]+offset:-n_operands[2]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[2]:])}}};'
 
   _i = 0
   for i in range(0, len(ctx.r[x]), (elems_per_reg := 4//dtype_out.itemsize)):
@@ -193,7 +193,8 @@ class PTXRenderer(Renderer):
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
         self.wmma_r  = [ssa("wmma", dtype="b32") for _ in range(0, u.dtype.itemsize//4)] # packing output
-        self.wmma_r += [ssa("wmma", dtype="b32") for vv in u.src for _ in range(0, len(r[vv]), 4//u.arg[2].itemsize)] # packing input
+        self.wmma_r += [ssa("wmma", dtype="b32") for vv in u.src[:2] for _ in range(0, len(r[vv]), 4//u.arg[2].itemsize)] # packing input
+        self.wmma_r += [ssa("wmma", dtype="b32") for vv in u.src[2:] for _ in range(0, len(r[vv]), 4//u.arg[3].itemsize)] # packing input
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL:("local",self.types[dtypes.ulong]),
