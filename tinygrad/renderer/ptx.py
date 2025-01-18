@@ -70,10 +70,8 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
       _i += 1
 
   yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'+\
-  f'{{{", ".join(ctx.wmma_r[:offset])}}},'+\
-  f'{{{", ".join(ctx.wmma_r[offset:n_operands[0]+offset])}}}, '+\
-  f'{{{", ".join(ctx.wmma_r[offset+n_operands[0]:-n_operands[2]])}}}, '+\
-  f'{{{", ".join(ctx.wmma_r[-n_operands[2]:])}}};'
+  f'{{{", ".join(ctx.wmma_r[:offset])}}}, {{{", ".join(ctx.wmma_r[offset:n_operands[0]+offset])}}}, '+\
+  f'{{{", ".join(ctx.wmma_r[offset+n_operands[0]:-n_operands[2]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[2]:])}}};'
 
   _i = 0
   for i in range(0, len(ctx.r[x]), (elems_per_reg := 4//dtype_out.itemsize)):
@@ -194,8 +192,8 @@ class PTXRenderer(Renderer):
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
-        self.wmma_r  = [ssa("wmma", dtype="b32") for i in range(0, u.dtype.itemsize//4)]
-        self.wmma_r += [ssa("wmma", dtype="b32") for vv in u.src for i in range(0, len(r[vv]), 4//u.arg[2].itemsize)]
+        self.wmma_r  = [ssa("wmma", dtype="b32") for _ in range(0, u.dtype.itemsize//4)] # packing output
+        self.wmma_r += [ssa("wmma", dtype="b32") for vv in u.src for _ in range(0, len(r[vv]), 4//u.arg[2].itemsize)] # packing input
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL:("local",self.types[dtypes.ulong]),
