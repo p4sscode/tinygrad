@@ -58,17 +58,25 @@ def mem_type(x: UOp): return 'shared' if any(_x.op is Ops.DEFINE_LOCAL for _x in
 
 def render_wmma(ctx: "PTXRenderer", x: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
-  _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = x.arg
-  n_operands = tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
-  dt_map = { dtypes.half: "f16", dtypes.float: "tf32" }
+  _, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ = x.arg
+  upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
+  n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
+  dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16" }
+  dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
   _i = 0
-  for vv in x.src[:2]:
+
+  for vv in x.src:
     for i in range(0, len(ctx.r[vv]), (elems_per_reg := 4//dtype_in.itemsize)):
       yield f"mov.b32 {ctx.wmma_r[_i]}, " + (f"{{{', '.join(ctx.r[vv][i:i+elems_per_reg])}}}" if elems_per_reg > 1 else ctx.r[vv][i]) + ";"
       _i += 1
-  yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32{" "*12}' +\
-  f'{{{", ".join(ctx.r[x])}}}, {{{", ".join(ctx.wmma_r[:n_operands[0]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[1]:])}}}, ' + \
-  f'{{{", ".join(ctx.r[x.src[2]])}}};'
+
+  yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'+\
+  f'{{%wmma_b32_0, %wmma_b32_1}}, {{{", ".join(ctx.wmma_r[:n_operands[0]])}}}, {{{", ".join(ctx.wmma_r[n_operands[0]:-n_operands[2]])}}}, '+\
+  f'{{{", ".join(ctx.wmma_r[-n_operands[2]:])}}};'
+
+  if dtype_out == dtypes.half:
+    yield 'mov.b32 {%wmma_f16_0, %wmma_f16_1}, %wmma_b32_0;'
+    yield 'mov.b32 {%wmma_f16_2, %wmma_f16_3}, %wmma_b32_1;'
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
@@ -184,7 +192,11 @@ class PTXRenderer(Renderer):
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
-        self.wmma_r = [ssa("wmma", dtype="b32") for vv in u.src[:2] for i in range(0, len(r[vv]), 4//u.arg[2].itemsize)]
+        ssa("wmma", dtype="b32")
+        ssa("wmma", dtype="b32")
+        ssa("wmma", dtype="b32")
+        ssa("wmma", dtype="b32")
+        self.wmma_r = [ssa("wmma", dtype="b32") for vv in u.src for i in range(0, len(r[vv]), 4//u.arg[2].itemsize)]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL:("local",self.types[dtypes.ulong]),
