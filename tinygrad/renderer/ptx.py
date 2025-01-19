@@ -58,18 +58,18 @@ def mem_type(x: UOp): return 'shared' if any(_x.op is Ops.DEFINE_LOCAL for _x in
 
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
-  _, (N, M, K), dtype_in, dtype_out, _, _, _, _ = wmma.arg
+  (N, M, K), dtype_in, dtype_out = wmma.arg[1], wmma.arg[2], wmma.arg[3]
   output_regs = ctx.r[wmma] if 4 == dtype_out.itemsize else ctx.wmma_r[3] # avoids unnecessary unpacking if output itemsize is 4
 
-  for src, regs in enumerate(ctx.wmma_r[:3]):
-    elems_per_reg = 4 // (dtype_in.itemsize if src < 2 else dtype_out.itemsize)
+  for src, regs in zip(wmma.src, ctx.wmma_r[:3]):
+    elems_per_reg = 4 // src.dtype.scalar().itemsize
     for reg in range(len(regs)): # pack input and acc registers
-      if elems_per_reg == 1: yield f"mov.b32 {regs[reg]}, {ctx.r[wmma.src[src]][reg]};" # necessary due to register type
-      else: yield f"mov.b32 {regs[reg]}, {{{', '.join(ctx.r[wmma.src[src]][reg * elems_per_reg : (reg+1) * elems_per_reg])}}};"
+      if elems_per_reg == 1: yield f"mov.b32 {regs[reg]}, {ctx.r[src][reg]};" # necessary due to register type
+      else: yield f"mov.b32 {regs[reg]}, {{{', '.join(ctx.r[src][reg * elems_per_reg : (reg+1) * elems_per_reg])}}};"
 
   dt_map_in, dt_map_out = {dtypes.float: "tf32", dtypes.half: "f16"}, {dtypes.float: "f32", dtypes.half: "f16"}
-  yield (f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'
-       + f'{{{", ".join(output_regs)}}}, {{{", ".join(ctx.wmma_r[0])}}}, {{{", ".join(ctx.wmma_r[1])}}}, {{{", ".join(ctx.wmma_r[2])}}};')
+  yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'+\
+        f'{{{", ".join(output_regs)}}}, {{{", ".join(ctx.wmma_r[0])}}}, {{{", ".join(ctx.wmma_r[1])}}}, {{{", ".join(ctx.wmma_r[2])}}};'
 
   if (elems_per_reg := 4 // dtype_out.itemsize) > 1:
     for reg in range(len(ctx.wmma_r[3])): # unpack output registers
