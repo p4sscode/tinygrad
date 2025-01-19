@@ -59,7 +59,7 @@ def mem_type(x: UOp): return 'shared' if any(_x.op is Ops.DEFINE_LOCAL for _x in
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
   _, (N, M, K), dtype_in, dtype_out, _, _, _, _ = wmma.arg
-  output_regs = ctx.r[wmma] if 4 // dtype_out.itemsize == 1 else ctx.wmma_r[3] # avoids unnecessary unpacking if output itemsize is 4
+  output_regs = ctx.r[wmma] if 4 == dtype_out.itemsize else ctx.wmma_r[3] # avoids unnecessary unpacking if output itemsize is 4
 
   for src, regs in enumerate(ctx.wmma_r[:3]):
     elems_per_reg = 4 // (dtype_in.itemsize if src < 2 else dtype_out.itemsize)
