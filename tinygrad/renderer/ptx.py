@@ -188,8 +188,8 @@ class PTXRenderer(Renderer):
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
         # registers for packing/unpacking output, input and acc
-        self.wmma_r = [[ssa("wmma_in", dtype="b32") for  _ in range(0, len(r[u.src[0]]), 4 // u.arg[2].itemsize)],
-                       [ssa("wmma_in", dtype="b32") for  _ in range(0, len(r[u.src[1]]), 4 // u.arg[2].itemsize)],
+        self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.arg[2].itemsize)],
+                       [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.arg[2].itemsize)],
                        [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.arg[3].itemsize)],
                        [ssa("wmma_out", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.arg[3].itemsize)]]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
