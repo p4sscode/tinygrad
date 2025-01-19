@@ -63,17 +63,19 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
 
   # pack input and acc
   for src, regs in enumerate(ctx.wmma_r[:3]):
-    for i in range(len(regs)):
-      elems = 4 // (dt_in if src < 2 else dt_out).itemsize # packed elements per register
-      yield f"mov.b32 {regs[i]}, " + (f"{{{', '.join(ctx.r[x.src[src]][i*elems : (i+1)*elems])}}}" if elems > 1 else ctx.r[x.src[src]][i]) + ";"
+    for reg in range(len(regs)):
+      elems_per_reg = 4 // (dt_in if src < 2 else dt_out).itemsize
+      if elems_per_reg == 1: yield f"mov.b32 {regs[reg]}, {ctx.r[x.src[src]][reg]};"
+      else: yield f"mov.b32 {regs[reg]}, {{{', '.join(ctx.r[x.src[src]][reg*elems_per_reg : (reg+1)*elems_per_reg])}}};"
 
   yield (f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dt_out]}.{dt_map_in[dt_in]}.{dt_map_in[dt_in]}.{dt_map_out[dt_out]}{" " * 12}'
        + f'{{{", ".join(ctx.wmma_r[3])}}}, {{{", ".join(ctx.wmma_r[0])}}}, {{{", ".join(ctx.wmma_r[1])}}}, {{{", ".join(ctx.wmma_r[2])}}};')
 
   # unpack output
-  for i in range(len(ctx.wmma_r[3])):
-    elems = 4 // dt_out.itemsize
-    yield "mov.b32 "+ (f"{{{', '.join(ctx.r[x][i*elems : (i+1)*elems])}}}" if elems > 1 else ctx.r[x][i]) + f", {ctx.wmma_r[3][i]};"
+  for reg in range(len(ctx.wmma_r[3])):
+    elems_per_reg = 4 // dt_out.itemsize
+    if elems_per_reg == 1: yield f"mov.b32 {ctx.r[x][reg]}, {ctx.wmma_r[3][reg]};"
+    else: yield f"mov.b32 {{{', '.join(ctx.r[x][reg*elems_per_reg : (reg+1)*elems_per_reg])}}}, {ctx.wmma_r[3][reg]};"
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
@@ -189,7 +191,7 @@ class PTXRenderer(Renderer):
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
-        # register for packing/unpacking output, input and acc
+        # registers for packing/unpacking output, input and acc
         self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.arg[2].itemsize)],
                        [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.arg[2].itemsize)],
                        [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.arg[3].itemsize)],
