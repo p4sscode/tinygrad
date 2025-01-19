@@ -61,20 +61,18 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
   _, (N, M, K), dtype_in, dtype_out, _, _, _, _ = wmma.arg
   output_regs = ctx.wmma_r[3] if 4 // dtype_out.itemsize > 1 else ctx.r[wmma] # avoids unnecessary unpacking if output itemsize is 4
 
-  # pack input and acc
   for src, regs in enumerate(ctx.wmma_r[:3]):
     elems_per_reg = 4 // (dtype_in.itemsize if src < 2 else dtype_out.itemsize)
-    for reg in range(len(regs)):
-      if elems_per_reg == 1: yield f"mov.b32 {regs[reg]}, {ctx.r[wmma.src[src]][reg]};"
+    for reg in range(len(regs)): # pack input and acc registers
+      if elems_per_reg == 1: yield f"mov.b32 {regs[reg]}, {ctx.r[wmma.src[src]][reg]};" # necessary due to register type
       else: yield f"mov.b32 {regs[reg]}, {{{', '.join(ctx.r[wmma.src[src]][reg * elems_per_reg : (reg+1) * elems_per_reg])}}};"
 
   dt_map_in, dt_map_out = {dtypes.float: "tf32", dtypes.half: "f16"}, {dtypes.float: "f32", dtypes.half: "f16"}
   yield (f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dtype_out]}.{dt_map_in[dtype_in]}.{dt_map_in[dtype_in]}.{dt_map_out[dtype_out]}{" "*12}'
        + f'{{{", ".join(output_regs)}}}, {{{", ".join(ctx.wmma_r[0])}}}, {{{", ".join(ctx.wmma_r[1])}}}, {{{", ".join(ctx.wmma_r[2])}}};')
 
-  # unpack output
   if (elems_per_reg := 4 // dtype_out.itemsize) > 1:
-    for reg in range(len(ctx.wmma_r[3])):
+    for reg in range(len(ctx.wmma_r[3])): # unpack output registers
       yield f"mov.b32 {{{', '.join(ctx.r[wmma][reg * elems_per_reg : (reg+1) * elems_per_reg])}}}, {ctx.wmma_r[3][reg]};"
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
