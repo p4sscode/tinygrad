@@ -5,7 +5,7 @@ from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import prod, flatten, get_single_element
+from tinygrad.helpers import flatten, get_single_element
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
