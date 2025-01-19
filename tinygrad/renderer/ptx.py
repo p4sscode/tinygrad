@@ -62,25 +62,19 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
   dt_map_in, dt_map_out = {dtypes.float: "tf32", dtypes.half: "f16"}, {dtypes.float: "f32", dtypes.half: "f16"}
   elems_in, elems_out = 4 // dt_in.itemsize, 4 // dt_out.itemsize
 
-  # pack input 0
-  for i in range(len(ctx.wmma_r['in_a'])):
-    yield f"mov.b32 {ctx.wmma_r['in_a'][i]}, " + (f"{{{', '.join(ctx.r[x.src[0]][i*elems_in : (i+1)*elems_in])}}}" if elems_in > 1 else ctx.r[x][i]) + ";"
-
-  # pack input 1
-  for i in range(len(ctx.wmma_r['in_b'])):
-    yield f"mov.b32 {ctx.wmma_r['in_b'][i]}, " + (f"{{{', '.join(ctx.r[x.src[1]][i*elems_in : (i+1)*elems_in])}}}" if elems_in > 1 else ctx.r[x][i]) + ";"
-
-  # pack acc
-  for i in range(len(ctx.wmma_r['acc'])):
-    yield f"mov.b32 {ctx.wmma_r['acc'][i]}, " + (f"{{{', '.join(ctx.r[x.src[2]][i*elems_out : (i+1)*elems_out])}}}" if elems_out > 1 else ctx.r[x][i]) + ";"
+  # pack input and acc
+  for src, regs in enumerate(ctx.wmma_r[:3]):
+    for i in range(len(regs)):
+      elems = elems_in if src < 2 else elems_out
+      yield f"mov.b32 {regs[i]}, " + (f"{{{', '.join(ctx.r[x.src[src]][i*elems : (i+1)*elems])}}}" if elems > 1 else ctx.r[x.src[src]][i]) + ";"
 
   yield (f'mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map_out[dt_out]}.{dt_map_in[dt_in]}.{dt_map_in[dt_in]}.{dt_map_out[dt_out]}{" " * 12}'
-       + f'{{{", ".join(ctx.wmma_r["out"])}}}, {{{", ".join(ctx.wmma_r["in_a"])}}}, '
-       + f'{{{", ".join(ctx.wmma_r["in_b"])}}}, {{{", ".join(ctx.wmma_r["acc"])}}};')
+       + f'{{{", ".join(ctx.wmma_r[3])}}}, {{{", ".join(ctx.wmma_r[0])}}}, '
+       + f'{{{", ".join(ctx.wmma_r[1])}}}, {{{", ".join(ctx.wmma_r[2])}}};')
 
   # unpack output
-  for i in range(len(ctx.wmma_r['out'])):
-    yield "mov.b32 "+ (f"{{{', '.join(ctx.r[x][i*elems_out : (i+1)*elems_out])}}}" if elems_out > 1 else ctx.r[x][i]) + f", {ctx.wmma_r['out'][i]};"
+  for i in range(len(ctx.wmma_r[3])):
+    yield "mov.b32 "+ (f"{{{', '.join(ctx.r[x][i*elems_out : (i+1)*elems_out])}}}" if elems_out > 1 else ctx.r[x][i]) + f", {ctx.wmma_r[3][i]};"
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
@@ -197,10 +191,10 @@ class PTXRenderer(Renderer):
       elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
         # register for packing/unpacking output, input and acc
-        self.wmma_r = { "out": [ssa("wmma_out", dtype="b32") for _ in range(0, 4 // u.arg[3].itemsize)],
-                        "acc": [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.arg[3].itemsize)],
-                        "in_a": [ssa("wmma_ina", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.arg[2].itemsize)],
-                        "in_b": [ssa("wmma_inb", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.arg[2].itemsize)]}
+        self.wmma_r = [[ssa("wmma_ina", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.arg[2].itemsize)],
+                       [ssa("wmma_inb", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.arg[2].itemsize)],
+                       [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.arg[3].itemsize)],
+                       [ssa("wmma_out", dtype="b32") for _ in range(0, u.dtype.itemsize // 4)]]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL:("local",self.types[dtypes.ulong]),
